@@ -1,0 +1,23 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/gates"
+    },
+    {
+      "path": "./packages/runstate"
+    },
+    {
+      "path": "./packages/protocol"
+    },
+    {
+      "path": "./packages/sdk"
+    },
+    {
+      "path": "./apps/mcp-server"
+    },
+    {
+      "path": "./apps/web"
+    }
+  ]
+}
