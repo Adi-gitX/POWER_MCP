@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+coverage/
+.DS_Store
+.power-local/
+apps/web/dist/
+
+# Next.js
+apps/site/.next/
+apps/site/out/
+apps/site/next-env.d.ts
