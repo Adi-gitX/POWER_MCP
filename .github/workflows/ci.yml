@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      # The marketing site builds from the same registry the server enforces,
+      # and its link checker fails the build on a dead internal link.
+      - run: pnpm build:web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: apps/web/dist
+
+  # The pipeline, end to end, through a real MCP client. Every gate, both human
+  # approvals, the migration gate, the scrubber, and the ledger.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: start server
+        working-directory: apps/mcp-server
+        run: |
+          PORT=4321 POWER_LOCAL_ROOT="$RUNNER_TEMP/power" nohup pnpm exec tsx src/index.ts > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 120); do curl -sf http://localhost:4321/health && break; sleep 0.5; done
+      - name: e2e
+        working-directory: apps/mcp-server
+        run: POWER_BASE_URL=http://localhost:4321 pnpm exec tsx src/e2e.ts
+      - name: server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/server.log"
+
+  # The anti-lock-in promise, enforced: a project created by the server must
+  # come up green from its own export, with nothing from Power on the path.
+  export-runs-anywhere:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: create and export a project
+        working-directory: apps/mcp-server
+        run: |
+          PORT=4321 POWER_LOCAL_ROOT="$RUNNER_TEMP/power" nohup pnpm exec tsx src/index.ts > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 120); do curl -sf http://localhost:4321/health && break; sleep 0.5; done
+          POWER_BASE_URL=http://localhost:4321 pnpm exec tsx src/e2e.ts > /dev/null
+          BUNDLE=$(ls "$RUNNER_TEMP"/power/exports/*.bundle | head -1)
+          git clone "$BUNDLE" "$RUNNER_TEMP/exported"
+      - name: the export runs on its own
+        working-directory: ${{ runner.temp }}/exported
+        run: |
+          test -f .env.example && test -f docker-compose.yml
+          cp .env.example .env
+          pnpm install
+          pnpm typecheck
+          pnpm test
