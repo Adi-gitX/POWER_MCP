@@ -1,0 +1,16 @@
+{
+  "name": "@power/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsx src/build.ts",
+    "dev": "tsx src/build.ts && node src/serve.mjs"
+  },
+  "dependencies": {
+    "@power/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
