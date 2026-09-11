@@ -1,0 +1,56 @@
+name: deploy-site
+
+# Builds apps/site (Next.js, statically exported) and publishes it to GitHub
+# Pages on every push to main.
+# Set the repository variable SITE_URL (Settings → Variables) to the public
+# origin, e.g. https://power.build, so canonical/OG URLs and the sitemap are
+# right. Without it the build falls back to the placeholder in layout.ts.
+#
+# Any static host works instead: `pnpm build:site` and upload apps/site/out.
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/site/**', 'packages/protocol/**', 'docs/evals/**', '.github/workflows/deploy-site.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @power/protocol build
+      - run: pnpm build:site
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/site/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
