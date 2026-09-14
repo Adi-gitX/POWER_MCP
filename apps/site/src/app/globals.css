@@ -1,0 +1,137 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@plugin "@tailwindcss/typography";
+
+/* ── design tokens ──────────────────────────────────────────────────────────
+   One blue for actions, one green for a gate that passed, one red for a
+   refusal. Everything else is ink, paper and hairlines. */
+@theme {
+  --color-paper: #ffffff;
+  --color-paper-2: #f6f8fc;
+  --color-line: #e4e8f1;
+  --color-line-2: #cfd6e4;
+
+  --color-ink: #191a1d;
+  --color-ink-2: #5b6270;
+  --color-ink-3: #9aa1ad;
+
+  --color-blue: #2563eb;
+  --color-blue-ink: #1d4ed8;
+  --color-blue-wash: #eef3ff;
+  --color-blue-line: #cfe0fd;
+
+  --color-pass: #16a34a;
+  --color-pass-wash: #e6f7ec;
+  --color-refuse: #c0392b;
+  --color-refuse-wash: #fdf1ef;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "EB Garamond", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-card: 14px;
+
+  --text-display: clamp(2.8rem, 7vw, 5.5rem);
+  --text-display--line-height: 0.98;
+  --text-h2: clamp(2rem, 4.4vw, 3.4rem);
+  --text-h2--line-height: 1.06;
+  --text-serif-lg: clamp(1.9rem, 4.4vw, 3.6rem);
+  --text-serif-lg--line-height: 1.12;
+}
+
+@layer base {
+  * { border-color: var(--color-line); }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-weight: 500; letter-spacing: -0.02em; }
+  h3 { font-weight: 600; letter-spacing: -0.01em; }
+  ::selection { background: var(--color-blue); color: #fff; }
+  :focus-visible { outline: 2px solid var(--color-blue); outline-offset: 2px; border-radius: 4px; }
+}
+
+@layer components {
+  .wrap { width: min(72rem, 100% - 3rem); margin-inline: auto; }
+  @media (min-width: 900px) { .wrap { width: min(72rem, 100% - 5rem); } }
+  .section { padding-block: clamp(4.5rem, 9vw, 7.5rem); }
+  .serif { font-family: var(--font-serif); }
+  .mono { font-family: var(--font-mono); }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 0.45rem;
+    font-family: var(--font-sans); font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-blue-ink);
+    background: var(--color-blue-wash); border: 1px solid var(--color-blue-line);
+    padding: 0.32rem 0.7rem; border-radius: 999px;
+  }
+  .eyebrow::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+}
+
+/* Lenis */
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-stopped { overflow: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ── reveal ─────────────────────────────────────────────────────────────────
+   Visible in the HTML. Only a browser that ran the head script hides it, and
+   only until it scrolls into view. */
+.js .reveal {
+  opacity: 0;
+  transform: translateY(var(--reveal-y, 18px));
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1) var(--reveal-delay, 0s),
+              transform 0.6s cubic-bezier(0.16, 1, 0.3, 1) var(--reveal-delay, 0s);
+  will-change: opacity, transform;
+}
+.js .reveal.is-in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* Docs prose: <em> is emphasis, except in the tool table where it marks a
+   capability (live, async). */
+.prose td em {
+  font-style: normal;
+  display: inline-block;
+  border: 1px solid var(--color-blue-line);
+  background: var(--color-blue-wash);
+  color: var(--color-blue-ink);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.prose :not(pre) > code { font-size: 0.88em; }
+
+/* ── the sky ────────────────────────────────────────────────────────────────
+   Deep blue at the top, white at the bottom edge, so the hero dissolves into
+   the page instead of ending on a line. */
+.hero-sky {
+  background: radial-gradient(
+    130% 95% at 50% 0%,
+    #2071e5 0%,
+    #3b86f2 28%,
+    #66a8f9 52%,
+    #a3c9fc 74%,
+    #e2edfd 92%,
+    #ffffff 100%
+  );
+}
+.hero-sky h1 em { font-style: italic; color: #ffffff; }
+.hero-sky ::selection { background: #ffffff; color: #2071e5; }
+
+.eyebrow-sky {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.4);
+}
