@@ -21,13 +21,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
-      # The marketing site builds from the same registry the server enforces,
-      # and its link checker fails the build on a dead internal link.
-      - run: pnpm build:web
+      # The site reads the same tool registry and plan limits the server
+      # enforces, so a drift between them fails the build here.
+      - run: pnpm --filter @power/protocol build
+      - run: pnpm build:site
       - uses: actions/upload-artifact@v4
         with:
           name: site
-          path: apps/web/dist
+          path: apps/site/out
 
   # The pipeline, end to end, through a real MCP client. Every gate, both human
   # approvals, the migration gate, the scrubber, and the ledger.
