@@ -173,6 +173,11 @@ const created = await call('create_project', { name: 'Bakery greeter' });
 step('create_project starts at the plan', created.ok && created.context?.phase === 'spec', created);
 step('create_project hands over the architect brief', Boolean(created.guidance?.includes('ARCHITECT')));
 const pid = created.data?.project_id as string;
+// Baseline the quota here, so the metering assertion at the end measures what
+// THIS run spent. Asserting an absolute number only held against a freshly
+// started server and failed on the third consecutive run.
+const quotaBefore =
+  ((await call('get_context', { project_id: pid })).data?.quota as { day: number } | undefined)?.day ?? null;
 
 const early = await call('write_file', { project_id: pid, path: 'src/x.ts', content: 'x' });
 step('writing before a plan is refused, not errored', early.ok === false && !early.isError, early);
@@ -349,7 +354,12 @@ console.log('\n— metering');
 const ctx = await call('get_context', { project_id: pid });
 const quota = ctx.data?.quota as { plan: string; day: number } | undefined;
 step('the envelope reports remaining build actions', typeof quota?.day === 'number', quota);
-step('reads and refusals were not billed (dev plan: 5000/day)', (quota?.day ?? 0) > 4950 && (quota?.day ?? 0) < 5000, quota);
+const spent = quotaBefore === null || quota === undefined ? null : quotaBefore - quota.day;
+step(
+  'reads and refusals were not billed (this run spent under 50 actions)',
+  spent !== null && spent > 0 && spent < 50,
+  { quotaBefore, quotaAfter: quota?.day, spent },
+);
 
 await client.close();
 console.log(`\n${failures === 0 ? 'ALL PASSED' : `${failures} FAILED`}\n`);
