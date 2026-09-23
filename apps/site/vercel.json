@@ -1,6 +1,5 @@
 {
   "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @power/protocol build && pnpm build:site",
-  "outputDirectory": "out",
   "framework": "nextjs",
   "headers": [
     { "source": "/(.*)", "headers": [
