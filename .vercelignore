@@ -1,0 +1,22 @@
+# Vercel installs dependencies and builds from source, so none of this
+# needs uploading. Without it the upload exceeds the 15k file limit.
+node_modules
+**/node_modules
+
+# build output, rebuilt on Vercel
+dist
+**/dist
+.next
+**/.next
+out
+**/out
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# local sandbox data: every project the server has generated
+.power-local
+**/.power-local
+
+# local scratch
+.git
+scratchpad
