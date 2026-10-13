@@ -18,7 +18,9 @@
 import { cp, mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
+import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import { judgeMigration, touchedTables, type MigrationProposal, type MigrationVerdict, type Rehearsal } from '@power/gates';
+import { freePort } from './runtime.js';
 
 export type Branch = 'live' | 'workbench';
 
@@ -50,6 +52,16 @@ export interface DbDriver {
   restoreLive(projectId: string, snapshot: string): Promise<void>;
   /** Reset the workbench to a fresh copy of live. */
   refreshWorkbench(projectId: string): Promise<void>;
+  /**
+   * A `postgres://` URL the project's own app can connect to.
+   *
+   * This is what joins the two halves of the product together. Without it the
+   * driver can provision branches, rehearse migrations and promote them, and
+   * the application being built can still reach none of it: it reads
+   * DATABASE_URL like any other Postgres app, and nothing was ever able to
+   * give it one.
+   */
+  connectionString(projectId: string, branch: Branch): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -76,6 +88,15 @@ const TABLES_SQL = `
 
 export class PgliteDriver implements DbDriver {
   private open = new Map<string, PGlite>();
+  /**
+   * Branches that are reachable over a socket, keyed the same way as `open`.
+   *
+   * The port outlives the server on purpose. Copying a branch has to close the
+   * PGlite instance underneath it, and the app's DATABASE_URL already names a
+   * port, so the server comes back up on the same one rather than handing out
+   * a URL that worked until the first `refresh_workbench`.
+   */
+  private serving = new Map<string, { server: PGLiteSocketServer | null; port: number }>();
 
   constructor(private readonly root: string) {}
 
@@ -92,12 +113,23 @@ export class PgliteDriver implements DbDriver {
       db = new PGlite(this.dir(projectId, branch));
       await db.waitReady;
       this.open.set(key, db);
+      // A branch that was being served before it was closed for a copy has to
+      // come back, on its original port.
+      const served = this.serving.get(key);
+      if (served && !served.server) served.server = await listen(db, served.port);
     }
     return db;
   }
 
   private async closeBranch(projectId: string, branch: string): Promise<void> {
     const key = `${projectId}/${branch}`;
+    // Stop serving before the instance goes away, or a connected app talks to
+    // a closed database. The port is kept so the socket can come back on it.
+    const served = this.serving.get(key);
+    if (served?.server) {
+      await served.server.stop();
+      served.server = null;
+    }
     const db = this.open.get(key);
     if (db) {
       await db.close();
@@ -243,8 +275,51 @@ export class PgliteDriver implements DbDriver {
     await this.copyBranch(projectId, 'live', 'workbench');
   }
 
+  async connectionString(projectId: string, branch: Branch): Promise<string> {
+    const key = `${projectId}/${branch}`;
+    const db = await this.db(projectId, branch);
+
+    let served = this.serving.get(key);
+    if (!served) {
+      // Ask the OS for the port rather than guessing, so two projects served
+      // at once cannot collide.
+      served = { server: null, port: await freePort() };
+      this.serving.set(key, served);
+    }
+    if (!served.server) served.server = await listen(db, served.port);
+
+    // PGlite has no roles and no password, and the socket is bound to
+    // loopback, so the credentials here are placeholders the driver requires
+    // rather than a secret.
+    return `postgres://postgres:postgres@127.0.0.1:${served.port}/postgres`;
+  }
+
   async close(): Promise<void> {
+    for (const served of this.serving.values()) if (served.server) await served.server.stop();
+    this.serving.clear();
     for (const db of this.open.values()) await db.close();
     this.open.clear();
   }
+}
+
+/**
+ * Puts a PGlite instance behind the Postgres wire protocol on loopback.
+ *
+ * This is what lets a generated app be an ordinary Postgres application --
+ * `pg`, a connection string, no Power-specific client -- which is the whole
+ * reason an exported project keeps working somewhere else.
+ */
+async function listen(db: PGlite, port: number): Promise<PGLiteSocketServer> {
+  const server = new PGLiteSocketServer({
+    db,
+    port,
+    host: '127.0.0.1',
+    // The default is one, and a pg.Pool opens several: with the default every
+    // connection after the first is refused and the app fails under its own
+    // first concurrent request. Queries are serialised by the server's own
+    // queue regardless, because PGlite is single-threaded.
+    maxConnections: 20,
+  });
+  await server.start();
+  return server;
 }
