@@ -1,19 +1,29 @@
 /**
  * The tool registry.
  *
- * One table describing every tool's name, whether it costs a build action, and
- * which phases it is legal in. Keeping this declarative rather than scattering
- * checks through handlers means the metering ledger, the phase guard, and the
- * published tool list can never drift apart — and the pricing page can be
- * generated from the same source as the enforcement.
+ * One table describing every tool's name, how it is billed, which phases it is
+ * legal in, and how a client should treat it. Keeping this declarative rather
+ * than scattering checks through handlers means the metering ledger, the phase
+ * guard, and the published tool list can never drift apart — and the pricing
+ * page is generated from the same source as the enforcement.
  *
- * Two rules encoded here that are worth stating out loud:
+ * Three rules encoded here that are worth stating out loud:
  *
  *   • Reads are free. A model that is afraid to look before it edits produces
- *     worse work, and some builders charge for `list_files`. Making reads free is both
- *     better engineering and a better pricing story.
+ *     worse work, and some builders charge for `list_files`. Making reads free
+ *     is both better engineering and a better pricing story.
  *   • `export_project` is free, forever. It is the anti-lock-in promise, and
  *     charging for the exit would make the promise a lie.
+ *   • The behavioural hints are *declared*, not derived. They used to be
+ *     computed from `metered`, which is a billing property rather than a
+ *     mutation one — so `export_project` announced itself as read-only while
+ *     writing a bundle to disk, and `write_file` announced that it destroyed
+ *     nothing. A client uses these to decide what to confirm with a person, so
+ *     getting them from the wrong field is a safety bug, not a cosmetic one.
+ *
+ * Every tool in this table has a handler. A registry entry without one is a
+ * tool a model will try and fail to call, so `assertRegistryCoverage` checks
+ * the correspondence in both directions.
  */
 import type { Phase } from '@power/runstate';
 
@@ -22,6 +32,8 @@ export type PhaseScope = readonly Phase[] | '*';
 
 export interface ToolSpec {
   name: string;
+  /** Shown to a person in a client's tool list, so it reads as English. */
+  title: string;
   /** Does this call consume a build action? Reads and housekeeping do not. */
   metered: boolean;
   phases: PhaseScope;
@@ -33,6 +45,14 @@ export interface ToolSpec {
   live_capable: boolean;
   /** Can exceed a client's tool timeout, so it must return a job handle. */
   async: boolean;
+  /** Observes without changing anything. */
+  read_only: boolean;
+  /** May overwrite or delete something that already exists. */
+  destructive: boolean;
+  /** Calling it twice has the same effect as calling it once. */
+  idempotent: boolean;
+  /** Reaches something outside this project, such as the package registry. */
+  open_world: boolean;
   summary: string;
 }
 
@@ -41,109 +61,122 @@ const ANY: PhaseScope = '*';
 export const TOOLS: readonly ToolSpec[] = [
   // ---- Orientation. Free, always legal. These are how a lost model recovers,
   // so gating or charging for them would be actively harmful.
-  f('get_context', ANY, 'Current phase, open gate failures, and the next action.'),
-  f('get_next_action', ANY, 'The single next tool call this run expects.'),
-  f('list_projects', ANY, 'Projects this account can open.'),
-  f('get_project', ANY, 'One project: status, URLs, environments.'),
-  f('get_guides', ANY, 'Retrieve a knowledge pack or integration playbook.'),
-  f('get_job', ANY, 'Poll an async job started by a slow tool.'),
+  read('get_context', ANY, 'Current state of the run', 'Where the run is: phase, open gate failures, retries left and the next call to make. Safe at any time; call it first if you are unsure.'),
+  read('get_next_action', ANY, 'The next call to make', 'The single tool call this run expects next, and why. Call it when a refusal leaves you unsure what to do.'),
+  read('list_projects', ANY, 'List projects', 'Every project on this account. The usual first call in a new conversation.'),
+  read('get_project', ANY, 'Get one project', 'One project: status, URLs and environments.'),
+  read('get_guides', ANY, 'Get a role brief or template', 'A role brief or artifact template: architect, implementer, verifier, or spec_template.'),
+  read('get_job', ANY, 'Poll a background job', 'The state of a job started by a slow tool. Free, so poll it as often as you like.'),
 
   // ---- Reading. Free by design.
-  f('list_files', ANY, 'List files in the workbench.'),
-  f('read_file', ANY, 'Read one file.'),
-  f('read_files', ANY, 'Read several files in one call.'),
-  f('search_code', ANY, 'Search the workbench by pattern.'),
-  f('get_logs', ANY, 'Runtime logs from workbench or live.'),
-  f('get_preview_url', ANY, 'The workbench preview URL.'),
-  f('get_publish_status', ANY, 'What is live, and at which version.'),
-  f('list_checkpoints', ANY, 'Restore points, newest first.'),
-  f('diff', ANY, 'Diff between two checkpoints, or against the live version.'),
+  read('list_files', ANY, 'List files', 'Files in the workbench.'),
+  read('read_file', ANY, 'Read a file', 'The contents of one file in the workbench.'),
+  read('read_files', ANY, 'Read several files', 'Several workbench files in one call. Prefer this over repeated read_file.'),
+  read('search_code', ANY, 'Search the code', 'Search the workbench for a pattern.'),
+  read('get_logs', ANY, 'Get logs', 'Runtime logs from the workbench or the live app.'),
+  // Not read_only, whatever its name suggests: it starts the project's dev
+  // server as a child process and waits for it to answer. Free, because
+  // looking at your own work should not cost a build action, and idempotent
+  // because an already-running preview is returned as it is.
+  m('get_preview_url', ANY, 'Start or get the preview', 'Start the project if it is not running and return the URL where the current workbench build can be viewed.', { metered: false, idempotent: true }),
+  read('get_publish_status', ANY, 'Get publish status', 'What is live, and at which version.'),
+  read('list_checkpoints', ANY, 'List checkpoints', 'Restore points for this project, newest first.'),
+  read('diff', ANY, 'Diff two checkpoints', 'Changes between two checkpoints, or against the live version.'),
 
-  // ---- The exit. Free, deliberately and permanently.
-  f('export_project', ANY, 'Download the full repo with history, ready to run elsewhere.'),
+  // ---- The exit. Free, deliberately and permanently. Not read-only: it
+  // writes a bundle, which is exactly the kind of thing the old derived hint
+  // got wrong.
+  m('export_project', ANY, 'Export the project', 'Download the whole repository with its history, ready to run anywhere else. Always free.', { metered: false, idempotent: true }),
 
   // ---- Project lifecycle.
-  m('create_project', ANY, 'Create a project and its workbench.'),
-  m('start_run', ['done', 'blocked'], 'Begin a new run on an existing project: a new plan, against the code and data already there.'),
-  m('import_repo', ['intake'], 'Import an existing repo that matches a supported shape.'),
-  m('update_project_metadata', ANY, 'Title, description, icon.'),
+  m('create_project', ANY, 'Create a project', 'Create a project and its workbench. The first call when building something new.'),
+  m('start_run', ['done', 'blocked'], 'Start another run', 'Begin a new run on a project that already shipped: a fresh plan against the code and data already there.'),
 
-  // ---- The pipeline. These are the spine: each submits an artifact to a gate.
-  m('submit_research', ['research'], 'Submit research.json to the research gate.'),
-  m('submit_spec', ['spec'], 'Submit SPEC.md to the spec gate.'),
-  m('request_spec_approval', ['spec_approval'], 'Ask the human to approve the plan.'),
-  m('submit_verification', ['verify'], 'Submit verification.json to the verification gate.'),
+  // ---- Gates. Each submits an artifact for checking and is legal in exactly
+  // one phase; calling one out of phase is refused with the reason.
+  m('submit_spec', ['spec'], 'Submit the plan', 'Submit SPEC.md to the spec gate. Legal in the spec phase. Refused with the failing rule if the plan is incomplete.', { idempotent: true }),
+  m('request_spec_approval', ['spec_approval'], 'Ask for plan approval', 'Ask the person to approve the plan in their browser. Only they can approve it; you cannot.', { idempotent: true }),
+  m('submit_verification', ['verify'], 'Submit verification', 'Submit verification.json to the verification gate. Legal in the verify phase, once the tests are green.', { idempotent: true }),
 
-  // ---- Writing. Legal only once there is an approved plan to build against.
-  m('write_file', ['build'], 'Create or replace a file.'),
-  m('edit_file', ['build'], 'Edit a file by exact string replacement.'),
-  m('apply_patch', ['build'], 'Apply a unified diff.'),
-  m('rename_file', ['build'], 'Rename or move a file.'),
-  m('copy_file', ['build'], 'Copy a file.'),
-  m('delete_file', ['build'], 'Delete a file.'),
-  m('add_dependency', ['build'], 'Add a package.', { async: true }),
-  m('remove_dependency', ['build'], 'Remove a package.', { async: true }),
+  // ---- Editing. All of these overwrite or remove something.
+  m('write_file', ['build'], 'Write a file', 'Create a file, or replace one that exists. Legal in the build phase.', { destructive: true, idempotent: true }),
+  m('edit_file', ['build'], 'Edit a file', 'Replace an exact string in a file. Legal in the build phase.', { destructive: true }),
+  m('rename_file', ['build'], 'Rename a file', 'Rename or move a file. Legal in the build phase.', { destructive: true }),
+  m('copy_file', ['build'], 'Copy a file', 'Copy a file, replacing the destination if it exists. Legal in the build phase.', { destructive: true, idempotent: true }),
+  m('delete_file', ['build'], 'Delete a file', 'Delete a file. Legal in the build phase.', { destructive: true, idempotent: true }),
 
-  // ---- Verification. Legal in build and verify: the implementer checks its own
-  // work before handing off, and the verifier checks it again with fresh eyes.
-  m('typecheck', ['build', 'verify'], 'Typecheck the workbench.', { async: true }),
-  m('run_tests', ['build', 'verify'], 'Run the test suite.', { async: true }),
-  m('run_command', ['build', 'verify'], 'Run an allowlisted command.', { async: true }),
-  m('run_in_browser', ['build', 'verify'], 'Evaluate JS against the live preview DOM.'),
-  m('screenshot_preview', ['build', 'verify'], 'Screenshot the preview.'),
-  m('navigate_preview', ['build', 'verify'], 'Point the preview at a route.'),
+  // ---- Dependencies reach the public package registry.
+  m('add_dependency', ['build'], 'Add a dependency', 'Install a package from the public registry. Legal in the build phase.', { async: true, open_world: true }),
+  m('remove_dependency', ['build'], 'Remove a dependency', 'Uninstall a package. Legal in the build phase.', { async: true, open_world: true, destructive: true, idempotent: true }),
 
-  // ---- Data. Note what is absent: there is no `execute_sql`. Arbitrary SQL
-  // against the database serving real users is the single most-complained-about
-  // behaviour in this category, so the capability simply does not exist.
-  m('provision_database', ['build'], 'Create the project database.', { async: true }),
-  m('pull_schema', ['build', 'verify'], 'Regenerate typed helpers from the schema.'),
-  m('query_database', ['build', 'verify'], 'Read from the workbench database. Row-capped.'),
-  m('propose_migration', ['build'], 'Submit a schema change to the migration gate.', {
-    async: true,
-  }),
-  m('promote_migration', ['verify'], 'Apply a gate-passed migration to live.', {
-    live: true,
-    async: true,
-  }),
+  // ---- Checking.
+  m('typecheck', ['build', 'verify'], 'Typecheck', 'Typecheck the workbench. Changes nothing.', { async: true, read_only: true, idempotent: true }),
+  m('run_tests', ['build', 'verify'], 'Run the tests', 'Run the test suite. The build gate will not let you hand off until this is green.', { async: true, idempotent: true }),
+  m('run_command', ['build', 'verify'], 'Run a command', 'Run one allowlisted command in the workbench. It can change files, so it is treated as destructive.', { async: true, destructive: true, open_world: true }),
 
-  // ---- History.
-  m('create_checkpoint', ANY, 'Label a restore point.'),
-  m('restore_checkpoint', ['build', 'verify', 'blocked'], 'Roll the workbench back.'),
+  // ---- Data. There is no tool here that runs SQL against live, by design.
+  m('provision_database', ['build'], 'Create the database', 'Create this project’s database: a live branch and a safe copy to work against.', { async: true, idempotent: true }),
+  m('pull_schema', ['build', 'verify'], 'Regenerate schema types', 'Regenerate typed helpers from the current schema.', { idempotent: true }),
+  m('query_database', ['build', 'verify'], 'Query the safe copy', 'Read from the workbench copy of the database. Row-capped, and it never touches live.', { read_only: true, idempotent: true }),
+  m('propose_migration', ['build'], 'Propose a schema change', 'Submit a schema change to the migration gate, which rehearses it on a copy of live and checks that it reverses cleanly.', { async: true }),
+  m('promote_migration', ['verify'], 'Apply the migration to live', 'Apply a gate-passed migration to the live database. Changes production data, and a destructive change needs the project name typed in the browser first.', { live: true, async: true, destructive: true }),
 
-  // ---- Shipping. `publish_app` is where the three publish conditions are
-  // enforced; it is the narrowest door in the system.
-  m('publish_app', ['verify'], 'Publish the workbench to the live app.', {
-    live: true,
-    async: true,
-  }),
-  m('rollback', ANY, 'Return the live app to the previous version.', { live: true, async: true }),
-  m('unpublish_app', ANY, 'Take the live app down.', { live: true }),
+  // ---- Checkpoints.
+  m('create_checkpoint', ANY, 'Save a checkpoint', 'Label a restore point you can come back to.'),
+  m('restore_checkpoint', ['build', 'verify', 'blocked'], 'Restore a checkpoint', 'Roll the workbench back to a checkpoint, discarding work after it.', { destructive: true, idempotent: true }),
 
-  // ---- Assets and secrets. `request_secret` never accepts a value over MCP;
-  // it returns a URL the human opens. The model only ever learns the env var name.
-  m('request_secret', ANY, 'Ask the user for a credential via a browser form.'),
-  m('request_user_upload', ANY, 'Ask the user for a file via the browser.'),
-  m('upload_asset', ['build'], 'Store an asset the project can serve.'),
-  m('generate_image', ['build'], 'Generate an image. Consumes credits.', { async: true }),
+  // ---- Release. Everything here changes what real users see.
+  m('publish_app', ['verify'], 'Publish', 'Publish the verified build to the live app. The person must confirm this in their browser first.', { live: true, async: true, destructive: true }),
+  m('rollback', ANY, 'Roll back', 'Return the live app to its previous version.', { live: true, async: true, destructive: true }),
+  m('unpublish_app', ANY, 'Take the app down', 'Take the live app offline.', { live: true, destructive: true, idempotent: true }),
+
+  // ---- People. Credentials arrive through the browser, never the chat.
+  m('request_secret', ANY, 'Ask for a credential', 'Ask the person for a credential through a single-use browser form. Never ask for a secret in the conversation.'),
 ];
 
-function f(name: string, phases: PhaseScope, summary: string): ToolSpec {
-  return { name, metered: false, phases, live_capable: false, async: false, summary };
+/** A free, non-mutating tool. The common case, so it gets the short helper. */
+function read(name: string, phases: PhaseScope, title: string, summary: string): ToolSpec {
+  return {
+    name,
+    title,
+    metered: false,
+    phases,
+    live_capable: false,
+    async: false,
+    read_only: true,
+    destructive: false,
+    idempotent: true,
+    open_world: false,
+    summary,
+  };
 }
 
 function m(
   name: string,
   phases: PhaseScope,
+  title: string,
   summary: string,
-  options: { live?: boolean; async?: boolean } = {},
+  options: {
+    metered?: boolean;
+    live?: boolean;
+    async?: boolean;
+    read_only?: boolean;
+    destructive?: boolean;
+    idempotent?: boolean;
+    open_world?: boolean;
+  } = {},
 ): ToolSpec {
   return {
     name,
-    metered: true,
+    title,
+    metered: options.metered ?? true,
     phases,
     live_capable: options.live ?? false,
     async: options.async ?? false,
+    read_only: options.read_only ?? false,
+    destructive: options.destructive ?? false,
+    idempotent: options.idempotent ?? false,
+    open_world: options.open_world ?? false,
     summary,
   };
 }

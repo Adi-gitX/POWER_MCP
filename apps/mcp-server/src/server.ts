@@ -21,10 +21,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { StateError, apply, type RunState } from '@power/runstate';
-import { buildContext, guard, lookupTool, ok, refuse, type ContextBlock, type PowerResponse } from '@power/protocol';
+import { buildContext, guard, lookupTool, ok, refuse, TOOLS, type ContextBlock, type PowerResponse } from '@power/protocol';
 import type { Principal } from './auth.js';
 import { DbError, type DbDriver } from './db.js';
 import { TOOL_DEFS, ToolError, type HandlerCtx } from './handlers.js';
+import type { Deployer } from './deploy.js';
+import type { Runtime } from './runtime.js';
 import type { Jobs } from './jobs.js';
 import type { Meter } from './metering.js';
 import { SERVER_INSTRUCTIONS } from './prompts.js';
@@ -34,6 +36,8 @@ import { scrubDeep, type SecretStore } from './secrets.js';
 import { NotFound, type Store } from './store.js';
 
 export interface Deps {
+  deployer: Deployer;
+  runtime: Runtime;
   storeFor: (userId: string) => Store;
   sandbox: Sandbox;
   db: DbDriver;
@@ -41,6 +45,7 @@ export interface Deps {
   jobs: Jobs;
   meter: Meter;
   baseUrl: string;
+  previewBaseUrl: string;
 }
 
 /** How long a slow tool waits before handing back a job id. */
@@ -48,10 +53,17 @@ const JOB_WAIT_MS = 20_000;
 
 /** Every handler must be a tool the registry knows. Checked once, at startup. */
 export function assertRegistryCoverage(): void {
-  const unknown = Object.keys(TOOL_DEFS).filter((name) => !lookupTool(name));
-  if (unknown.length > 0) {
-    throw new Error(`handlers exist for tools not in the registry: ${unknown.join(', ')}`);
-  }
+  const handlers = Object.keys(TOOL_DEFS);
+  const registry = TOOLS.map((t) => t.name);
+
+  const unknown = handlers.filter((name) => !lookupTool(name));
+  if (unknown.length) throw new Error(`handlers with no registry entry: ${unknown.join(', ')}`);
+
+  // The other direction, which used to go unchecked. A registry entry with no
+  // handler is advertised in tools/list and fails when a model calls it, and
+  // it is how the published count drifted to ten above what was served.
+  const unimplemented = registry.filter((name) => !(name in TOOL_DEFS));
+  if (unimplemented.length) throw new Error(`registry entries with no handler: ${unimplemented.join(', ')}`);
 }
 
 export function createMcpServer(deps: Deps, principal: Principal): McpServer {
@@ -62,13 +74,18 @@ export function createMcpServer(deps: Deps, principal: Principal): McpServer {
     server.registerTool(
       name,
       {
-        title: name,
-        description: `${spec.summary}${spec.metered ? '' : ' (free)'}`,
+        title: spec.title,
+        // The phase is part of the description because a model otherwise
+        // discovers legality only by being refused, and a refusal costs a turn.
+        description: `${spec.summary}${spec.metered ? '' : ' Free.'}`,
         inputSchema: def.schema,
+        // Declared on the spec, not inferred from billing. A client uses these
+        // to decide what to confirm with a person.
         annotations: {
-          readOnlyHint: !spec.metered,
-          destructiveHint: spec.live_capable || name.startsWith('delete') || name === 'restore_checkpoint',
-          openWorldHint: false,
+          readOnlyHint: spec.read_only,
+          destructiveHint: spec.destructive,
+          idempotentHint: spec.idempotent,
+          openWorldHint: spec.open_world,
         },
       },
       async (args, extra): Promise<CallToolResult> =>
@@ -117,10 +134,39 @@ async function wrap(
   const billable = spec.metered && outcome.kind === 'ok';
   if (spec.metered && !billable) await deps.meter.release(principal.user_id);
 
+  // ---- 5b. A job that outlived the client's wait was reported as a refusal
+  // and had its reservation released, so its work was never billed. It is
+  // billed once, here, when the model collects it.
+  let lateBill: { tool: string; projectId: string | null } | null = null;
+  if (name === 'get_job' && outcome.kind === 'ok') {
+    lateBill = deps.jobs.claimBill(String(args.job_id), principal.user_id);
+    if (lateBill && lookupTool(lateBill.tool)?.metered) {
+      // Already done, so quota being exhausted cannot un-spend it. Reserve to
+      // keep the count honest and let the next call be the one that refuses.
+      await deps.meter.reserve(principal.user_id);
+      await deps.meter.record({
+        at: new Date().toISOString(),
+        request_id: requestId,
+        user_id: principal.user_id,
+        project_id: lateBill.projectId,
+        tool: lateBill.tool,
+        outcome: 'ok',
+        billable: true,
+        duration_ms: Date.now() - startedAt,
+      });
+    }
+  }
+
   // ---- 6. Nothing leaves with a secret in it.
+  //
+  // get_job hands back another tool's result, and it is that tool's project
+  // whose secrets have to be scrubbed. The poll carries no project_id of its
+  // own, which is why a run_tests slow enough to become a job used to return
+  // its output unredacted -- the fast path was scrubbed and the slow one was not.
   let result = outcome.result;
-  if (projectId) {
-    const values = await deps.secrets.allValues(projectId);
+  const scrubFor = projectId ?? (name === 'get_job' ? deps.jobs.projectOf(String(args.job_id), principal.user_id) : null);
+  if (scrubFor) {
+    const values = await deps.secrets.allValues(scrubFor);
     if (values.length) result = scrubDeep(result, values);
   }
 
@@ -157,18 +203,25 @@ async function execute(name: string, args: Record<string, unknown>, deps: Deps, 
     const ctx: HandlerCtx = {
       store,
       sandbox: deps.sandbox,
+      deployer: deps.deployer,
+      runtime: deps.runtime,
       db: deps.db,
       secrets: deps.secrets,
       jobs: deps.jobs,
       meter: deps.meter,
       userId: principal.user_id,
       baseUrl: deps.baseUrl,
+      previewBaseUrl: deps.previewBaseUrl,
       project: null,
       state: null,
       approvals: null,
     };
 
-    if (def.needsProject) {
+    // Orientation tools take a project when they have one and answer without
+    // it when they do not, so a model that has just connected can ask where it
+    // is without that being an error.
+    const wantsProject = def.needsProject || (def.optionalProject === true && Boolean(args.project_id));
+    if (wantsProject) {
       const id = String(args.project_id ?? '');
       ctx.project = await store.getProject(id);
       if (!ctx.project) {
@@ -178,11 +231,21 @@ async function execute(name: string, args: Record<string, unknown>, deps: Deps, 
       ctx.approvals = await store.getApprovals(id);
       context = buildContext({ projectId: id, state: ctx.state, env, lastErrors: await store.getGateErrors(id) });
 
-      // Which human decision does this live-affecting tool need? publish and
-      // rollback use the publish confirmation; a migration carries its own, and
-      // the handler decides whether a non-destructive one needs it at all.
+      // Which human decision does this live-affecting tool need?
+      //
+      // publish and rollback spend the publish confirmation. A migration
+      // carries its own, and promote_migration's handler decides whether an
+      // additive change needs one at all. unpublish has its own too, because
+      // it means the opposite of publishing and a confirmation to publish must
+      // never be spendable on taking the app offline. It used to be handed a
+      // literal true, so the one tool that takes someone's live app down was
+      // the only live-capable tool needing nobody's consent.
       const humanConfirmed =
-        name === 'promote_migration' || name === 'unpublish_app' ? true : Boolean(ctx.approvals.publish_confirmed_at);
+        name === 'promote_migration'
+          ? true
+          : name === 'unpublish_app'
+            ? Boolean(ctx.approvals.unpublish_confirmed_at)
+            : Boolean(ctx.approvals.publish_confirmed_at);
 
       const verdict = guard({ toolName: name, state: ctx.state, context, targetEnv: env, humanConfirmed });
       if (!verdict.allowed) return { kind: 'refused', result: toResult(verdict.refusal) };
@@ -224,7 +287,10 @@ async function execute(name: string, args: Record<string, unknown>, deps: Deps, 
 
     if (!spec.async) return await work();
 
-    const job = await deps.jobs.run(name, work, JOB_WAIT_MS);
+    const job = await deps.jobs.run(name, work, JOB_WAIT_MS, {
+      userId: principal.user_id,
+      projectId: ctx.project?.id ?? (typeof args.project_id === 'string' ? args.project_id : null),
+    });
     if (job.settled) {
       if (job.job.status === 'failed') throw new ToolError(job.job.error ?? 'job failed');
       return job.job.result as Outcome;

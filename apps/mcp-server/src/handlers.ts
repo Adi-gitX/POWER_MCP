@@ -15,7 +15,9 @@ import { nextAction, roleForPhase } from '@power/protocol';
 import { apply, createRunState, type RunEvent, type RunState } from '@power/runstate';
 import { z } from 'zod';
 import type { DbDriver } from './db.js';
+import { collectRelease, DeployError, deployProjectName, type DeployCredential, type Deployer } from './deploy.js';
 import type { Jobs } from './jobs.js';
+import type { Runtime } from './runtime.js';
 import type { Meter } from './metering.js';
 import { ROLE_BRIEFS, specTemplate, type Role } from './prompts.js';
 import type { Sandbox } from './sandbox.js';
@@ -25,12 +27,23 @@ import type { Approvals, Project, Store } from './store.js';
 export interface HandlerCtx {
   store: Store;
   sandbox: Sandbox;
+  deployer: Deployer;
+  runtime: Runtime;
   db: DbDriver;
   secrets: SecretStore;
   jobs: Jobs;
   meter: Meter;
   userId: string;
   baseUrl: string;
+  /**
+   * Where previews are served, which must not be where Power's own pages are.
+   *
+   * A preview is an application an assistant wrote. Served from Power's origin
+   * it is same-origin with the pages that hold the approve and confirm forms,
+   * and same-origin script can read a CSRF token straight out of Power's HTML.
+   * No token or header check can fix that; only a different origin can.
+   */
+  previewBaseUrl: string;
   project: Project | null;
   state: RunState | null;
   approvals: Approvals | null;
@@ -56,6 +69,8 @@ export interface ToolDef {
   handler: Handler;
   /** Does the tool act on a project? If so, wrap() loads it and runs the guard. */
   needsProject: boolean;
+  /** Load the project when one is given, but do not require it. */
+  optionalProject?: boolean;
 }
 
 export class ToolError extends Error {
@@ -75,6 +90,87 @@ const QUERY_ROW_CAP = 100;
 function need(ctx: HandlerCtx): { project: Project; state: RunState; approvals: Approvals } {
   if (!ctx.project || !ctx.state || !ctx.approvals) throw new ToolError('this tool needs a project');
   return { project: ctx.project, state: ctx.state, approvals: ctx.approvals };
+}
+
+/**
+ * The answer when there is no project yet. A successful result, not an error:
+ * a model that has just connected has done nothing wrong by asking where it
+ * is, and it needs to be told rather than corrected.
+ */
+async function startHere(ctx: HandlerCtx): Promise<{ data: Record<string, unknown>; guidance?: string }> {
+  const projects = await ctx.store.listProjects();
+  return {
+    data: {
+      projects,
+      next_action: projects.length
+        ? { tool: 'get_context', args: { project_id: projects[0]!.id }, why: 'Open an existing project.' }
+        : { tool: 'create_project', args: {}, why: 'No project exists yet. Create one to start a run.' },
+      message: projects.length
+        ? `No project id was given. This account has ${projects.length} project(s); pass one as project_id.`
+        : 'No project id was given, and this account has no projects yet. Call create_project to start one.',
+    },
+  };
+}
+
+/** What is currently live, from the deployment record rather than a directory. */
+async function liveSummary(ctx: HandlerCtx, projectId: string): Promise<{ version: string | null; url: string | null }> {
+  const live = await ctx.store.latestDeployment(projectId, 'production');
+  if (!live || live.ready_state !== 'READY') return { version: null, url: null };
+  return { version: live.version, url: `https://${live.url}` };
+}
+
+/** The name of the account credential a publish needs. */
+const DEPLOY_TOKEN = 'POWER_DEPLOY_TOKEN';
+const DEPLOY_BUDGET_MS = 240_000;
+
+async function deployCredential(ctx: HandlerCtx): Promise<DeployCredential | null> {
+  if (!ctx.deployer.requiresCredential) return { token: '', teamId: null };
+  const token = await ctx.secrets.accountValue(ctx.userId, DEPLOY_TOKEN);
+  if (!token) return null;
+  return { token, teamId: (await ctx.secrets.accountValue(ctx.userId, 'POWER_DEPLOY_TEAM_ID')) ?? null };
+}
+
+/**
+ * No credential yet: a refusal, not an error.
+ *
+ * Nothing is broken — the person simply has not connected a hosting account.
+ * The confirmation they already gave is deliberately left intact, so the
+ * retry after they paste the token does not need a second approval.
+ */
+async function askForDeployToken(ctx: HandlerCtx, project: Project): Promise<HandlerResult> {
+  const pending = await ctx.secrets.request({
+    user_id: ctx.userId,
+    project_id: null,
+    name: DEPLOY_TOKEN,
+    env: 'live',
+    provider: 'hosting',
+    why: 'Power publishes to your own hosting account, so you own the app and the domain.',
+  });
+  return {
+    refusal: {
+      reason: 'needs_user_input',
+      message:
+        `Publishing deploys to the user's own hosting account, and there is no token for it yet. ` +
+        `Ask them to open ${ctx.baseUrl}/secrets/${pending.token} and paste a hosting access token there. ` +
+        `Do not ask for the token in this conversation, and do not call publish_app again until they say it is saved. ` +
+        `It is stored once and reused for every project.`,
+    },
+  };
+}
+
+/** Turn a provider failure into something the model can act on. */
+function deployRefusal(error: unknown, logs: string[] = []): HandlerResult {
+  if (!(error instanceof DeployError)) throw error;
+  const tail = logs.length ? `\n\nBuild output:\n${logs.join('\n')}` : '';
+  return {
+    refusal: {
+      reason: error.kind === 'auth' ? 'needs_user_input' : 'unsafe_for_live',
+      message:
+        error.transient
+          ? `${error.message} This is temporary; wait and try again.${tail}`
+          : `${error.message} This will not fix itself; change something before retrying.${tail}`,
+    },
+  };
 }
 
 function approvalUrl(ctx: HandlerCtx, project: Project): string {
@@ -102,12 +198,52 @@ function staleGreen(state: RunState): RunEvent[] {
 }
 
 /** Secrets scoped to the workbench, injected into every command the sandbox runs. */
-const workbenchEnv = (ctx: HandlerCtx, p: Project) => ctx.secrets.valuesFor(p.id, 'workbench');
+/**
+ * The environment a project's own process runs with.
+ *
+ * The user's secrets for that environment, plus the two variables that join the
+ * app to the platform: a connection string for the right branch and which
+ * environment this is. Without them a generated app is an ordinary Postgres
+ * application with no Postgres to talk to, which is exactly what it was -- the
+ * preview served its page and every /api call failed.
+ *
+ * In the workbench the platform's values win, because the safe copy is the
+ * whole point and a stray DATABASE_URL secret pointing at production would
+ * defeat it. In live the user's own secret wins, because that is where their
+ * real database belongs and Power's loopback URL is only useful to a publish
+ * that stays on this machine.
+ */
+async function envFor(ctx: HandlerCtx, p: Project, env: 'workbench' | 'live'): Promise<Record<string, string>> {
+  const secrets = await ctx.secrets.valuesFor(p.id, env);
+  const platform = {
+    DATABASE_URL: await ctx.db.connectionString(p.id, env),
+    POWER_ENV: env,
+  };
+  return env === 'workbench' ? { ...secrets, ...platform } : { ...platform, ...secrets };
+}
+
+const workbenchEnv = (ctx: HandlerCtx, p: Project) => envFor(ctx, p, 'workbench');
 
 const project = (schema: z.ZodRawShape, handler: Handler): ToolDef => ({
   schema: { project_id: projectId, ...schema },
   handler,
   needsProject: true,
+});
+
+/**
+ * Orientation tools, which have to work before a project exists.
+ *
+ * The server instructions tell a lost model to call `get_next_action`, but
+ * both of these used to require a project_id, so the first call of a fresh
+ * conversation came back as a protocol error — the one shape that makes a
+ * client model apologise and stop. They now answer without one and say where
+ * to start.
+ */
+const orient = (handler: Handler): ToolDef => ({
+  schema: { project_id: projectId.optional() },
+  handler,
+  needsProject: false,
+  optionalProject: true,
 });
 
 interface StoredMigration {
@@ -192,7 +328,8 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
           run_id: runId,
           previous_run: previous.trace_id,
           goal: args.goal,
-          live: await ctx.sandbox.publishStatus(p.id),
+          // What is live stays live while the next run is planned and built.
+          live: await liveSummary(ctx, p.id),
           note: 'The workbench, checkpoints, database and secrets carry over. Write a plan for this change only.',
         },
         guidance:
@@ -205,7 +342,8 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     },
   ),
 
-  get_context: project({}, async (_args, ctx) => {
+  get_context: orient(async (_args, ctx) => {
+    if (!ctx.project) return await startHere(ctx);
     const { project: p, state, approvals } = need(ctx);
     const guidance = briefFor(state);
     return {
@@ -230,7 +368,8 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     };
   }),
 
-  get_next_action: project({}, async (_args, ctx) => {
+  get_next_action: orient(async (_args, ctx) => {
+    if (!ctx.project) return await startHere(ctx);
     const { state } = need(ctx);
     const guidance = briefFor(state);
     return {
@@ -270,7 +409,10 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     schema: { job_id: z.string() },
     needsProject: false,
     handler: async (args, ctx) => {
-      const job = ctx.jobs.get(args.job_id as string);
+      // Scoped to the caller: one registry serves every principal, so without
+      // the user id a leaked or guessed job id returned another tenant's tool
+      // output. An unknown id and someone else's are the same answer here.
+      const job = ctx.jobs.get(args.job_id as string, ctx.userId);
       if (!job) throw new ToolError(`no job ${args.job_id}. Jobs are kept for 30 minutes.`);
       return { data: job };
     },
@@ -300,25 +442,50 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
   }),
 
   get_logs: project({}, async (_args, ctx) => {
-    const { project: p, state } = need(ctx);
+    const { project: p } = need(ctx);
+    const preview = ctx.runtime.status(p.id);
     return {
       data: {
-        note: 'Runtime logs stream from the hosted sandbox. Locally, this is the run history and the live status.',
-        history: state.history.slice(-20),
-        live: await ctx.sandbox.publishStatus(p.id),
+        preview_state: preview?.state ?? 'stopped',
+        lines: ctx.runtime.logs(p.id, 100),
+        ...(preview?.error ? { error: preview.error } : {}),
+        note: preview ? undefined : 'Nothing is running. Call get_preview_url to start it.',
       },
     };
   }),
 
+
   get_preview_url: project({}, async (_args, ctx) => {
     const { project: p } = need(ctx);
+
+    // Start it if it is not up. This is the call that turns a directory of
+    // files into something a person can look at, so it does the work rather
+    // than reporting that nothing is running.
+    const preview = await ctx.runtime.start(p.id, await workbenchEnv(ctx, p));
+    if (preview.state !== 'ready') {
+      const log = ctx.runtime.logs(p.id, 30);
+      return {
+        refusal: {
+          reason: 'unsafe_for_live',
+          message:
+            `The preview did not start: ${preview.error ?? 'unknown reason'}. ` +
+            `Fix what the output reports, then call get_preview_url again.` +
+            (log.length ? `\n\nDev server output:\n${log.join('\n')}` : ''),
+        },
+      };
+    }
+
+    const published = await ctx.store.latestDeployment(p.id, 'production');
     return {
       data: {
-        note: 'The hosted workbench serves a preview URL. Locally, the workbench is a directory.',
-        live: await ctx.sandbox.publishStatus(p.id),
+        url: `${ctx.previewBaseUrl}${preview.path}`,
+        state: preview.state,
+        note: 'This is the work in progress. It reloads as files change.',
+        ...(published ? { published_url: `https://${published.url}`, published_version: published.version } : {}),
       },
     };
   }),
+
 
   list_checkpoints: project({}, async (_args, ctx) => {
     const { project: p } = need(ctx);
@@ -338,7 +505,18 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
 
   get_publish_status: project({}, async (_args, ctx) => {
     const { project: p } = need(ctx);
-    return { data: await ctx.sandbox.publishStatus(p.id) };
+    const live = await ctx.store.latestDeployment(p.id, 'production');
+    if (!live) return { data: { published: false, message: 'Nothing has been published yet.' } };
+    return {
+      data: {
+        published: live.ready_state === 'READY',
+        version: live.version,
+        url: `https://${live.url}`,
+        ready_state: live.ready_state,
+        provider: live.provider,
+        deployed_at: live.created_at,
+      },
+    };
   }),
 
   export_project: project({}, async (_args, ctx) => {
@@ -699,6 +877,7 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
       const name = args.name as string;
       if (!validEnvName(name)) throw new ToolError(`${name} is not a valid environment variable name (UPPER_SNAKE_CASE).`);
       const pending = await ctx.secrets.request({
+        user_id: ctx.userId,
         project_id: p.id,
         name,
         env: args.env as 'workbench' | 'live' | 'both',
@@ -739,25 +918,160 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
   // ------------------------------------------------------------ shipping
   publish_app: project({}, async (_args, ctx) => {
     const { project: p, approvals } = need(ctx);
-    const published = await ctx.sandbox.publish(p.id);
+    const cred = await deployCredential(ctx);
+    if (!cred) return await askForDeployToken(ctx, p);
+
+    // Tag first: the files come from the tag, so a release can only ever
+    // contain committed work.
+    const { version } = await ctx.sandbox.tagRelease(p.id);
+    const files = await collectRelease(ctx.sandbox, p.id, version);
+    const name = deployProjectName(p.slug);
+
+    let deployment;
+    try {
+      deployment = await ctx.deployer.create(
+        {
+          projectName: name,
+          target: 'production',
+          files,
+          // Without this a published app has no database and none of its live
+          // secrets, so it builds and then fails on its first request.
+          env: await envFor(ctx, p, 'live'),
+          meta: { power_project: p.id, power_version: version },
+        },
+        cred,
+      );
+      deployment = await ctx.deployer.waitForReady(deployment.id, cred, DEPLOY_BUDGET_MS);
+    } catch (error) {
+      return deployRefusal(error);
+    }
+
+    await ctx.store.putDeployment({
+      id: deployment.id,
+      project_id: p.id,
+      provider: ctx.deployer.provider,
+      target: 'production',
+      version,
+      commit: await ctx.sandbox.headCommit(p.id),
+      url: deployment.url,
+      ready_state: deployment.ready_state,
+      deploy_project_name: name,
+      created_at: deployment.created_at,
+    });
+
+    if (deployment.ready_state !== 'READY') {
+      // No `published` event: the run is not done, because nothing is live.
+      const logs = await ctx.deployer.buildLogs(deployment.id, cred).catch(() => []);
+      return {
+        refusal: {
+          reason: 'unsafe_for_live',
+          message:
+            `The build did not become ready (${deployment.ready_state}). Nothing was published. ` +
+            `Fix what the build output reports, then publish again.` +
+            (logs.length ? `\n\nBuild output:\n${logs.join('\n')}` : ''),
+        },
+      };
+    }
+
     // The confirmation is one-shot: it authorised this publish and no other.
     await ctx.store.putApprovals(p.id, { ...approvals, publish_confirmed_at: null });
+    const url = `https://${deployment.aliases[0] ?? deployment.url}`;
     return {
       events: [{ type: 'published' }],
-      data: { ...published, message: `Published ${published.version}. The live copy is a clean clone of that tag.` },
+      data: {
+        version,
+        url,
+        deployment_id: deployment.id,
+        ready_state: deployment.ready_state,
+        provider: ctx.deployer.provider,
+        message:
+          ctx.deployer.provider === 'local'
+            ? // Say what this actually is. The local deployer writes the release
+              // and serves its files; it runs no server, so the app's own API is
+              // not up and a model must not report that it is.
+              `Published ${version} to ${url}. This is the local deployer: it serves the built ` +
+              `files so the page can be opened, but it runs no server, so the app's /api routes ` +
+              `are not live there. The preview is where the running app is. Set POWER_DEPLOYER ` +
+              `to deploy to real hosting.`
+            : `Published ${version} to ${url}. It is in the user's own hosting account, not ours.`,
+      },
     };
   }),
 
   rollback: project({}, async (_args, ctx) => {
     const { project: p, approvals } = need(ctx);
-    const result = await ctx.sandbox.rollback(p.id);
-    await ctx.store.putApprovals(p.id, { ...approvals, publish_confirmed_at: null });
-    return { data: { ...result, message: `Live is now ${result.version}, a re-release of the previous version.` } };
+    const cred = await deployCredential(ctx);
+    if (!cred) return await askForDeployToken(ctx, p);
+
+    const history = await ctx.store.listDeployments(p.id, 'production', 5);
+    const previous = history.filter((d) => d.ready_state === 'READY')[1];
+    if (!previous) {
+      return {
+        refusal: {
+          reason: 'needs_user_input',
+          message: 'There is no earlier successful release to roll back to.',
+        },
+      };
+    }
+
+    try {
+      // A promotion, not a rebuild: that build already exists and is ready.
+      const promoted = await ctx.deployer.promote(previous.deploy_project_name, previous.id, cred);
+      await ctx.store.putDeployment({ ...previous, ready_state: promoted.ready_state });
+      await ctx.store.putApprovals(p.id, { ...approvals, publish_confirmed_at: null });
+      const url = `https://${promoted.aliases[0] ?? promoted.url}`;
+      return {
+        data: {
+          version: previous.version,
+          url,
+          deployment_id: previous.id,
+          message: `Live is ${previous.version} again, promoted without a rebuild.`,
+        },
+      };
+    } catch (error) {
+      return deployRefusal(error);
+    }
   }),
 
   unpublish_app: project({}, async (_args, ctx) => {
-    const { project: p } = need(ctx);
-    await ctx.sandbox.unpublish(p.id);
-    return { data: { unpublished: true } };
+    const { project: p, approvals } = need(ctx);
+    const cred = await deployCredential(ctx);
+    if (!cred) return await askForDeployToken(ctx, p);
+
+    const live = await ctx.store.latestDeployment(p.id, 'production');
+    if (!live) return { data: { unpublished: false, message: 'Nothing is published.' } };
+
+    // Taking someone's live app offline is the most destructive thing here, and
+    // it used to be the only live-capable tool that needed nobody's consent.
+    // Typed rather than a button, for the same reason a destructive migration
+    // is: a button is too easy to click on an assistant's say-so.
+    if (!approvals.unpublish_confirmed_at) {
+      return {
+        refusal: {
+          reason: 'needs_user_input',
+          message:
+            `Taking ${p.name} offline needs the user to confirm it in a browser; this cannot be ` +
+            `confirmed in chat. Ask them to open ${ctx.baseUrl}/projects/${p.id} and type the ` +
+            `project name to confirm, then call unpublish_app again.`,
+        },
+      };
+    }
+
+    try {
+      await ctx.deployer.remove(live.id, cred);
+    } catch (error) {
+      return deployRefusal(error);
+    }
+    await ctx.store.putDeployment({ ...live, ready_state: 'CANCELED' });
+    // One-shot: it authorised this unpublish and no other.
+    await ctx.store.putApprovals(p.id, { ...approvals, unpublish_confirmed_at: null });
+    return {
+      data: {
+        unpublished: true,
+        // Say plainly what was not removed: the hosting project and any
+        // domains are the user's, and deleting those is not ours to do.
+        message: `The deployment is gone. The hosting project and any domains stay in the user's own account.`,
+      },
+    };
   }),
 };

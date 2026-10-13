@@ -10,34 +10,130 @@
  * None of the approval endpoints is a tool. They are applied here, from a
  * browser, and nowhere else. The conversation can ask; it cannot answer.
  */
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { join, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { apply, canPublish, phaseLabel } from '@power/runstate';
 import { Redis } from 'ioredis';
 import { authenticatorFromEnv, type Principal } from './auth.js';
 import { PgliteDriver } from './db.js';
+import { LocalDeployer } from './deploy-local.js';
+import { VercelDeployer } from './deploy-vercel.js';
 import { Jobs } from './jobs.js';
+import { LocalRuntime } from './runtime.js';
 import { FileLedger, MemoryQuota, Meter, RedisQuota, type QuotaStore } from './metering.js';
-import { openPgliteControlPlane } from './pgstore.js';
+import { configFromEnv, resourceMetadataUrl } from './oauth/metadata.js';
+import { mailerFromEnv } from './oauth/pages.js';
+import { PowerOAuthProvider } from './oauth/provider.js';
+import { createOAuthApp, isOAuthPath } from './oauth/routes.js';
+import { openPgControlPlane, openPgliteControlPlane } from './pgstore.js';
 import { LocalSandbox } from './sandbox.js';
-import { MemorySecrets } from './secrets.js';
+import { csrfField, mintCsrf, sameOrigin, verifyCsrf, CSRF_FIELD } from './csrf.js';
+import { PgSecrets, secretKeyFromEnv } from './secrets-pg.js';
 import { assertRegistryCoverage, createMcpServer, type Deps } from './server.js';
+
+/**
+ * Read .env before anything else does.
+ *
+ * Searched upward from the working directory, because the server is usually
+ * started by a package manager that has already moved into its own directory
+ * while the file sits at the root of the repository. Node reads the file
+ * itself, so there is no dependency for this, and a missing file is the normal
+ * case in production where the platform supplies the environment.
+ */
+for (let dir = process.cwd(); ; ) {
+  try {
+    process.loadEnvFile(join(dir, '.env'));
+    break;
+  } catch {
+    const parent = dirname(dir);
+    if (parent === dir) break; // reached the filesystem root
+    dir = parent;
+  }
+}
 
 const PORT = Number(process.env.PORT ?? 4321);
 const ROOT = resolve(process.env.POWER_LOCAL_ROOT ?? '.power-local');
 const BASE_URL = process.env.POWER_BASE_URL ?? `http://localhost:${PORT}`;
 
+/**
+ * Where previews are served.
+ *
+ * A preview is an application an assistant wrote, and it must not share an
+ * origin with the pages that carry the approve-plan and confirm-publish forms.
+ * Same-origin script can read a CSRF token out of Power's own HTML, so no
+ * token and no header check can substitute for a separate host.
+ *
+ * Set POWER_PREVIEW_HOST to a hostname pointing at this same server -- a
+ * subdomain is enough, because an origin is scheme, host and port, and Power's
+ * session cookie is host-only. Unset, previews fall back to Power's own origin,
+ * which is acceptable on loopback and is warned about loudly anywhere else.
+ */
+const PREVIEW_HOST = process.env.POWER_PREVIEW_HOST?.trim() || null;
+const PREVIEW_BASE_URL = PREVIEW_HOST
+  ? `${new URL(BASE_URL).protocol}//${PREVIEW_HOST}`
+  : BASE_URL;
+
 assertRegistryCoverage();
 
-const controlPlane = await openPgliteControlPlane(join(ROOT, 'control-plane'));
-const auth = authenticatorFromEnv(process.env);
+/**
+ * The control plane holds every account, OAuth token, project and secret, and
+ * it decides which of them a request can see: three mutually exclusive
+ * row-level security scopes, enforced by Postgres rather than by this code.
+ *
+ * Postgres when DATABASE_URL is set, and PGlite on disk when it is not.
+ * Chosen explicitly, and said out loud at startup, because the difference is
+ * whether state survives the process: a hosted node with no DATABASE_URL would
+ * keep its own private copy of every token and lose it on the next deploy.
+ */
+const controlPlane = process.env.DATABASE_URL
+  ? await openPgControlPlane(process.env.DATABASE_URL)
+  : await openPgliteControlPlane(join(ROOT, 'control-plane'));
+
+// Everything OAuth hangs off one config, validated here so a bad origin is a
+// startup failure rather than a connector that never arrives.
+const oauthConfig = configFromEnv({ ...process.env, POWER_BASE_URL: BASE_URL });
+const oauthProvider = new PowerOAuthProvider(controlPlane.oauth, oauthConfig);
+const oauthApp = createOAuthApp({
+  store: controlPlane.oauth,
+  controlPlane,
+  config: oauthConfig,
+  mailer: mailerFromEnv(process.env),
+  devLogin: process.env.POWER_DEV_LOGIN === '1',
+});
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+const ALLOWED_ORIGINS = new Set(
+  ['https://claude.ai', 'https://claude.com', ...(process.env.POWER_ALLOWED_ORIGINS ?? '').split(',')]
+    .map((o) => o.trim())
+    .filter(Boolean),
+);
+const ALLOWED_HOSTS = new Set(
+  [new URL(BASE_URL).host, ...(PREVIEW_HOST ? [PREVIEW_HOST] : []), `localhost:${PORT}`, `127.0.0.1:${PORT}`, ...(process.env.POWER_ALLOWED_HOSTS ?? '').split(',')]
+    .map((h) => h.trim())
+    .filter(Boolean),
+);
+
+const auth = authenticatorFromEnv(process.env, {
+  oauth: { verifier: oauthProvider, planOf: (u) => controlPlane.planOf(u), resource: oauthConfig.resource },
+  host: new URL(BASE_URL).hostname,
+});
 const quota: QuotaStore = process.env.REDIS_URL ? new RedisQuota(new Redis(process.env.REDIS_URL)) : new MemoryQuota();
 const meter = new Meter(quota, new FileLedger(join(ROOT, 'ledger.jsonl')), (u) => controlPlane.planOf(u));
-const secrets = new MemorySecrets();
+const SECRET_KEY = secretKeyFromEnv(process.env, LOOPBACK_HOSTS.has(new URL(BASE_URL).hostname));
+const secrets = new PgSecrets(controlPlane.sql, SECRET_KEY);
 const sandbox = new LocalSandbox(ROOT);
+// A project's own dev server, so it can be seen while it is being built.
+const runtime = new LocalRuntime((id) => join(ROOT, 'projects', id));
 const db = new PgliteDriver(ROOT);
-const deps: Deps = { storeFor: (u) => controlPlane.storeFor(u), sandbox, db, secrets, jobs: new Jobs(), meter, baseUrl: BASE_URL };
+// Explicit, never a fallback: a publish that silently went nowhere real is
+// the failure this whole path exists to remove.
+const deployer =
+  process.env.POWER_DEPLOYER === 'local' ? new LocalDeployer(join(ROOT, 'previews'), BASE_URL) : new VercelDeployer();
+
+const deps: Deps = { deployer, runtime, storeFor: (u) => controlPlane.storeFor(u), sandbox, db, secrets, jobs: new Jobs(), meter, baseUrl: BASE_URL, previewBaseUrl: PREVIEW_BASE_URL };
 
 // ---------------------------------------------------------------- helpers
 
@@ -64,10 +160,38 @@ function redirect(res: ServerResponse, to: string): void {
   res.end();
 }
 
-async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
-  let raw = '';
-  for await (const chunk of req) raw += chunk;
-  return new URLSearchParams(raw);
+/**
+ * Read a form body with a ceiling.
+ *
+ * This is reachable before authentication, on the secret form, so an
+ * unbounded read here is a way to exhaust the process with one request. The
+ * previous version concatenated the whole stream into a string with no limit.
+ */
+async function readForm(req: IncomingMessage, limitBytes = 64 * 1024): Promise<URLSearchParams> {
+  const declared = Number(req.headers['content-length'] ?? 0);
+  if (declared > limitBytes) {
+    req.destroy();
+    throw new PayloadTooLarge();
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+    total += buf.length;
+    if (total > limitBytes) {
+      req.destroy();
+      throw new PayloadTooLarge();
+    }
+    chunks.push(buf);
+  }
+  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+}
+
+class PayloadTooLarge extends Error {
+  constructor() {
+    super('request body too large');
+    this.name = 'PayloadTooLarge';
+  }
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -75,7 +199,13 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 // ---------------------------------------------------------------- MCP
 
 async function handleMcp(req: IncomingMessage, res: ServerResponse, principal: Principal): Promise<void> {
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    // The transport has supported these all along and was given none of them.
+    enableDnsRebindingProtection: true,
+    allowedHosts: [...ALLOWED_HOSTS],
+    allowedOrigins: [...ALLOWED_ORIGINS],
+  });
   const server = createMcpServer(deps, principal);
   res.on('close', () => {
     void transport.close();
@@ -101,22 +231,33 @@ async function projectPage(principal: Principal, id: string, res: ServerResponse
 
   const gates = Object.entries(state.gates).map(([k, v]) => `<span class="pill">${k}: ${v}</span>`).join('');
 
+  // Every form below authorises something an assistant is not allowed to do
+  // for itself, so each one carries proof that it came from a page Power
+  // rendered for this person.
+  const csrf = csrfField(mintCsrf(SECRET_KEY, principal.user_id, id));
+
   let action = '';
   if (state.phase === 'spec_approval') {
     action = `<h2>Your assistant wrote a plan and needs your approval</h2>
 <p><a href="/projects/${id}/spec">Read the plan</a> before deciding. Approval is a decision about <em>what</em> gets built; the structure has already been checked by code.</p>
-<form method="post" action="/projects/${id}/approve-spec"><button class="primary">Approve the plan</button></form>
-<form method="post" action="/projects/${id}/reject-spec"><input type="text" name="reason" placeholder="What should change?" required style="max-width:280px;display:inline-block"> <button>Send it back</button></form>`;
+<form method="post" action="/projects/${id}/approve-spec">${csrf}<button class="primary">Approve the plan</button></form>
+<form method="post" action="/projects/${id}/reject-spec">${csrf}<input type="text" name="reason" placeholder="What should change?" required style="max-width:280px;display:inline-block"> <button>Send it back</button></form>`;
   } else if (state.phase === 'verify' && publish.allowed) {
     action = approvals.publish_confirmed_at
       ? `<h2>Ready to publish</h2><p>You've confirmed. Ask your assistant to call <code>publish_app</code>.</p>`
       : `<h2>Verified. Publish it?</h2>
 <p>Every P0 requirement was verified by interaction and the checks are green. This will make <strong>${esc(project.name)}</strong> live.</p>
-<form method="post" action="/projects/${id}/confirm-publish"><button class="primary">Confirm publish</button></form>`;
+<form method="post" action="/projects/${id}/confirm-publish">${csrf}<button class="primary">Confirm publish</button></form>`;
   } else if (state.phase === 'blocked') {
     action = `<h2>The run stopped and needs you</h2><p>${esc(state.blocked_reason ?? '')}</p><p class="muted">Ask your assistant to restore an earlier checkpoint, or tell it how to proceed. Nothing has been published.</p>`;
   } else if (state.phase === 'done') {
-    action = `<h2>Live</h2><p>Version <code>${live.version}</code> at <code>${esc(live.live_path ?? '')}</code></p>`;
+    action =
+      `<h2>Live</h2><p>Version <code>${live.version}</code> at <code>${esc(live.live_path ?? '')}</code></p>` +
+      (approvals.unpublish_confirmed_at
+        ? `<p>✓ Confirmed. Ask your assistant to call <code>unpublish_app</code>.</p>`
+        : `<details><summary class="muted">Take it offline</summary>
+<p class="muted">This removes the deployment. The hosting project and any domains stay in your own account, and the code and its history are untouched.</p>
+<form method="post" action="/projects/${id}/confirm-unpublish">${csrf}<input type="text" name="confirm" placeholder="Type ${esc(project.slug)} to confirm" autocomplete="off" required style="max-width:280px;display:inline-block"> <button class="danger">Take ${esc(project.name)} offline</button></form></details>`);
   } else {
     action = `<p class="muted">Nothing needs you right now. Your assistant is working: <strong>${phaseLabel(state.phase)}</strong>.</p>`;
   }
@@ -128,7 +269,7 @@ async function projectPage(principal: Principal, id: string, res: ServerResponse
       ? `<h2>A data change needs your confirmation</h2>
 <div class="warn"><strong>${esc(migration.proposal.intent)}</strong><ul>${lines}</ul>
 <p>This change can lose data. It will only reach your live app if you type <code>${esc(project.slug)}</code> below. Your assistant cannot do this for you.</p>
-${approvals.migration_confirmed_at ? '<p>✓ Confirmed. Ask your assistant to call <code>promote_migration</code>.</p>' : `<form method="post" action="/projects/${id}/confirm-migration"><input type="text" name="confirm" placeholder="Type ${esc(project.slug)} to confirm" autocomplete="off" required style="max-width:280px;display:inline-block"> <button class="danger">Apply to live app</button></form>`}
+${approvals.migration_confirmed_at ? '<p>✓ Confirmed. Ask your assistant to call <code>promote_migration</code>.</p>' : `<form method="post" action="/projects/${id}/confirm-migration">${csrf}<input type="text" name="confirm" placeholder="Type ${esc(project.slug)} to confirm" autocomplete="off" required style="max-width:280px;display:inline-block"> <button class="danger">Apply to live app</button></form>`}
 </div>`
       : `<h2>A data change is ready</h2><p><strong>${esc(migration.proposal.intent)}</strong></p><ul>${lines}</ul><p class="muted">Nothing existing is removed. It reaches the live app when your assistant calls <code>promote_migration</code> during verification.</p>`;
   }
@@ -162,12 +303,154 @@ ${error ? `<p class="warn">${esc(error)}</p>` : ''}
   );
 }
 
+/** Static files from a local deployment. Path traversal is refused, not sanitised. */
+async function servePreview(local: LocalDeployer, id: string, rest: string, res: ServerResponse): Promise<void> {
+  const root = local.dirFor(id);
+  const wanted = rest === '' || rest.endsWith('/') ? `${rest}index.html` : rest;
+
+  // A release is laid out the way its framework wants, not the way this route
+  // once assumed. The template's page is at public/index.html, so looking only
+  // at the release root answered 404 for every app Power generates.
+  for (const candidate of [wanted, `public/${wanted}`]) {
+    const target = resolve(root, candidate);
+    if (target !== root && !target.startsWith(root + sep)) return text(res, 400, 'bad path');
+    try {
+      const body = await readFile(target);
+      const type = MIME[extname(target).toLowerCase()] ?? 'application/octet-stream';
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+      res.end(body);
+      return;
+    } catch {
+      // Try the next layout.
+    }
+  }
+  text(res, 404, 'not found');
+}
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+/** Forward a request to a project's dev server and stream the answer back. */
+function proxyTo(req: IncomingMessage, res: ServerResponse, port: number, path: string): void {
+  const upstream = httpRequest(
+    { host: '127.0.0.1', port, path, method: req.method, headers: { ...req.headers, host: `127.0.0.1:${port}` } },
+    (answer) => {
+      res.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(res);
+    },
+  );
+  upstream.on('error', (error) => {
+    // The child died mid-request. Say so rather than hanging.
+    if (!res.headersSent) text(res, 502, `the preview stopped responding: ${error.message}`);
+    else res.end();
+  });
+  req.pipe(upstream);
+}
+
+// ------------------------------------------------------------ http guards
+
+
+/**
+ * `www-authenticate` has to be exposed or a browser-based client cannot read
+ * the challenge that tells it where to sign in.
+ */
+function applyCors(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('access-control-allow-origin', origin);
+    res.setHeader('vary', 'Origin');
+  }
+  res.setHeader('access-control-expose-headers', 'mcp-session-id, www-authenticate');
+}
+
+function preflight(req: IncomingMessage, res: ServerResponse): void {
+  applyCors(req, res);
+  res.setHeader('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader(
+    'access-control-allow-headers',
+    'authorization, content-type, mcp-session-id, mcp-protocol-version, last-event-id',
+  );
+  res.setHeader('access-control-max-age', '86400');
+  res.writeHead(204);
+  res.end();
+}
+
+/**
+ * The challenge Claude follows to find the authorization server. Without the
+ * `resource_metadata` pointer it has nothing to go on and the connection fails
+ * with no useful error on either side.
+ */
+function unauthorised(res: ServerResponse): void {
+  res.setHeader(
+    'www-authenticate',
+    `Bearer realm="power", error="invalid_token", resource_metadata="${resourceMetadataUrl(oauthConfig)}"`,
+  );
+  res.writeHead(401, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ error: 'invalid_token', error_description: 'A valid OAuth access token is required.' }));
+}
+
+/** The host the client actually asked for, without its port. */
+function hostOf(req: IncomingMessage): string {
+  return (req.headers.host ?? '').split(':')[0] ?? '';
+}
+
 // ---------------------------------------------------------------- routing
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', BASE_URL);
   try {
-    if (url.pathname === '/health') return text(res, 200, 'ok');
+    if (req.method === 'OPTIONS') return preflight(req, res);
+    applyCors(req, res);
+
+    // A health check that answers 200 unconditionally is worse than none: the
+    // platform keeps a node in rotation, and every tool call fails, because the
+    // one thing that can actually be broken is the database this never touched.
+    if (url.pathname === '/health') {
+      try {
+        await controlPlane.sql.query('select 1');
+      } catch (error) {
+        return text(res, 503, `control plane unreachable: ${(error as Error).message}`);
+      }
+      return text(res, 200, 'ok');
+    }
+
+    // The origin split, enforced both ways.
+    //
+    // On the preview host nothing of Power's own exists: no project pages, no
+    // MCP endpoint, no sign-in, no OAuth. That is the point -- an application
+    // an assistant wrote is served there, and it must not be able to reach the
+    // forms that authorise a publish, even with a stolen token, because it
+    // cannot reach them at all.
+    //
+    // On Power's own host, previews stop being served once a preview host
+    // exists, so there is no second route back to the same-origin problem.
+    const onPreviewHost = PREVIEW_HOST !== null && hostOf(req) === PREVIEW_HOST;
+    if (onPreviewHost && !/^\/(preview|previews)\//.test(url.pathname)) {
+      return text(res, 404, 'not found');
+    }
+    if (PREVIEW_HOST !== null && !onPreviewHost && /^\/preview\//.test(url.pathname)) {
+      return text(res, 404, `previews are served from ${PREVIEW_HOST}`);
+    }
+
+    // Locally deployed releases, served so a publish produces a URL that opens.
+    const preview = /^\/previews\/(dpl_local_[a-z0-9_]+)\/(.*)$/.exec(url.pathname);
+    if (preview && deployer instanceof LocalDeployer) {
+      return await servePreview(deployer, preview[1]!, preview[2]!, res);
+    }
+
+    // Discovery, sign-in and consent all live in the Express app, and all of
+    // them have to answer before anything is authenticated.
+    if (isOAuthPath(url.pathname)) return oauthApp(req, res);
 
     // Secret forms are reached by an unguessable token, not by login.
     const secretMatch = /^\/secrets\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
@@ -185,11 +468,27 @@ const server = createServer(async (req, res) => {
     }
 
     const principal = await auth.authenticate(req);
-    if (!principal) {
-      res.setHeader('www-authenticate', 'Bearer realm="power"');
-      return text(res, 401, 'unauthorised');
-    }
+    if (!principal) return unauthorised(res);
     await controlPlane.ensureUser(principal.user_id, principal.plan);
+
+    // A project's preview, proxied so the URL lives on Power's own origin.
+    // A port on the server's loopback is no use to anyone else once Power is
+    // hosted; a path under this origin is.
+    const livePreview = /^\/preview\/([a-z0-9]+)(\/.*)?$/.exec(url.pathname);
+    if (livePreview) {
+      const projectId = livePreview[1]!;
+      const owned = await controlPlane.storeFor(principal.user_id).getProject(projectId);
+      if (!owned) return text(res, 404, 'no such project');
+      const port = runtime.portFor(projectId);
+      if (!port) {
+        return html(
+          res,
+          503,
+          `<h1>Not running</h1><p class="muted">This project's preview is not up. Ask the assistant to call <code>get_preview_url</code>.</p>`,
+        );
+      }
+      return proxyTo(req, res, port, (livePreview[2] ?? '/') + url.search);
+    }
 
     if (url.pathname === '/mcp') return await handleMcp(req, res, principal);
 
@@ -220,6 +519,27 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method !== 'POST') return text(res, 405, 'method not allowed');
+
+    // Nothing below this line may run for a request Power cannot attribute to
+    // a page it rendered for this person. These four endpoints are the human
+    // decisions -- approving a plan, and confirming a change to the live app --
+    // and they were reachable by any page on the internet that could get a
+    // logged-in browser to submit a form.
+    const origin = sameOrigin(req.headers, new URL(BASE_URL).origin);
+    if (!origin.ok) return text(res, 403, `refused: ${origin.reason}`);
+
+    const form = await readForm(req);
+    const csrf = verifyCsrf(SECRET_KEY, form.get(CSRF_FIELD), principal.user_id, id);
+    if (!csrf.ok) {
+      return text(
+        res,
+        403,
+        csrf.reason === 'expired'
+          ? 'this page is too old to act on. Reload the project page and try again.'
+          : 'refused: this form did not come from Power.',
+      );
+    }
+
     const state = await store.getRun(id);
     const approvals = await store.getApprovals(id);
     const now = new Date().toISOString();
@@ -230,7 +550,7 @@ const server = createServer(async (req, res) => {
       return redirect(res, `/projects/${id}`);
     }
     if (sub === 'reject-spec') {
-      const reason = (await readForm(req)).get('reason') ?? 'rejected by the user';
+      const reason = form.get('reason') ?? 'rejected by the user';
       await store.putRun(id, apply(state, { type: 'spec_rejected', reason }));
       return redirect(res, `/projects/${id}`);
     }
@@ -239,9 +559,18 @@ const server = createServer(async (req, res) => {
       await store.putApprovals(id, { ...approvals, publish_confirmed_at: now });
       return redirect(res, `/projects/${id}`);
     }
+    if (sub === 'confirm-unpublish') {
+      // Typed, not a button: this is the most destructive thing Power can do
+      // on a user's behalf, and it is the opposite of publishing, so it never
+      // shares the publish confirmation.
+      const typed = form.get('confirm') ?? '';
+      if (typed.trim() !== project.slug) return text(res, 400, `type "${project.slug}" exactly to confirm`);
+      await store.putApprovals(id, { ...approvals, unpublish_confirmed_at: now });
+      return redirect(res, `/projects/${id}`);
+    }
     if (sub === 'confirm-migration') {
       // Typed confirmation: the project slug, exactly. A button is too easy to click.
-      const typed = (await readForm(req)).get('confirm') ?? '';
+      const typed = form.get('confirm') ?? '';
       if (typed.trim() !== project.slug) return text(res, 400, `type "${project.slug}" exactly to confirm`);
       await store.putApprovals(id, { ...approvals, migration_confirmed_at: now });
       return redirect(res, `/projects/${id}`);
@@ -249,21 +578,48 @@ const server = createServer(async (req, res) => {
     return text(res, 404, 'not found');
   } catch (error) {
     console.error('[power] request failed', error);
-    if (!res.headersSent) text(res, 500, (error as Error).message);
+    if (error instanceof PayloadTooLarge) {
+      if (!res.headersSent) text(res, 413, 'request body too large');
+      return;
+    }
+    if (!res.headersSent) text(res, 500, 'internal error');
   }
 });
+
+// A short request timeout would cut streaming responses off mid-flight, so it
+// is generous; the headers timeout is what actually sheds a slow-loris.
+server.headersTimeout = 10_000;
+server.requestTimeout = 60_000;
+server.keepAliveTimeout = 65_000;
+server.maxHeadersCount = 64;
 
 server.listen(PORT, () => {
   console.log(`power  mcp:   ${BASE_URL}/mcp`);
   console.log(`power  web:   ${BASE_URL}/`);
   console.log(`power  data:  ${ROOT}`);
-  console.log(`power  auth:  ${process.env.POWER_TOKENS ? 'bearer tokens' : 'dev (no tokens configured)'}`);
+  // Say which one, because the difference is whether anything survives a
+  // deploy, and getting it wrong is silent until the first restart.
+  console.log(`power  state: ${process.env.DATABASE_URL ? 'postgres' : `pglite at ${ROOT}/control-plane (not durable across deploys)`}`);
+  console.log(`power  oauth: ${oauthConfig.issuer}/.well-known/oauth-authorization-server`);
+  console.log(`power  auth:  ${[process.env.POWER_DEV_AUTH === '1' ? 'dev' : '', process.env.POWER_TOKENS ? 'bearer tokens' : '', 'oauth'].filter(Boolean).join(' + ')}`);
   console.log(`power  quota: ${process.env.REDIS_URL ? 'redis' : 'in-memory'}`);
+  console.log(`power  prevw: ${PREVIEW_HOST ? PREVIEW_BASE_URL : `${BASE_URL} (same origin)`}`);
+  if (!PREVIEW_HOST && !LOOPBACK_HOSTS.has(new URL(BASE_URL).hostname)) {
+    // Not fatal, because refusing to start would be worse for someone who has
+    // already deployed. Loud, because the consequence is that an application
+    // an assistant wrote shares an origin with the forms that authorise a
+    // publish, and same-origin script can read the token that protects them.
+    console.warn(
+      '[power] POWER_PREVIEW_HOST is unset off loopback. Previews share this origin, so a\n' +
+        '        generated app can read the CSRF token out of Power\u2019s own pages and confirm\n' +
+        '        its own publish. Point a subdomain at this server and set it.',
+    );
+  }
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     server.close();
-    void Promise.all([db.close(), controlPlane.close()]).finally(() => process.exit(0));
+    void Promise.all([runtime.stopAll(), db.close(), controlPlane.close()]).finally(() => process.exit(0));
   });
 }
