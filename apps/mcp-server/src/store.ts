@@ -31,6 +31,14 @@ export interface Approvals {
   publish_confirmed_at: string | null;
   /** One-shot: typed confirmation for a destructive migration. Never set from chat. */
   migration_confirmed_at: string | null;
+  /**
+   * One-shot: typed confirmation for taking the live app offline.
+   *
+   * Its own field rather than reusing the publish confirmation, because the
+   * two mean opposite things and a confirmation to publish must never be
+   * spendable on an unpublish.
+   */
+  unpublish_confirmed_at: string | null;
 }
 
 export type ArtifactName = 'SPEC.md' | 'verification.json' | 'research.json' | 'migration.json';
@@ -52,6 +60,25 @@ export interface Store {
 
   getApprovals(projectId: string): Promise<Approvals>;
   putApprovals(projectId: string, approvals: Approvals): Promise<void>;
+
+  /** What has been deployed, so publish status survives a restart. */
+  putDeployment(d: DeploymentRecord): Promise<void>;
+  latestDeployment(projectId: string, target: 'production' | 'preview'): Promise<DeploymentRecord | null>;
+  listDeployments(projectId: string, target: 'production' | 'preview', limit?: number): Promise<DeploymentRecord[]>;
+}
+
+export interface DeploymentRecord {
+  id: string;
+  project_id: string;
+  provider: string;
+  target: 'production' | 'preview';
+  /** The release tag for a production deploy; the commit for a preview. */
+  version: string | null;
+  commit: string | null;
+  url: string;
+  ready_state: string;
+  deploy_project_name: string;
+  created_at: string;
 }
 
 export class NotFound extends Error {
@@ -66,9 +93,11 @@ const emptyApprovals = (): Approvals => ({
   spec_approval_requested_at: null,
   publish_confirmed_at: null,
   migration_confirmed_at: null,
+  unpublish_confirmed_at: null,
 });
 
 export class MemoryStore implements Store {
+  private deployments: DeploymentRecord[] = [];
   private projects = new Map<string, Project>();
   private runs = new Map<string, string>();
   private artifacts = new Map<string, Partial<Record<ArtifactName, string>>>();
@@ -124,4 +153,16 @@ export class MemoryStore implements Store {
   async putApprovals(projectId: string, approvals: Approvals): Promise<void> {
     this.approvals.set(projectId, { ...approvals });
   }
+  async putDeployment(d: DeploymentRecord): Promise<void> {
+    this.deployments = [d, ...this.deployments.filter((x) => x.id !== d.id)];
+  }
+
+  async latestDeployment(projectId: string, target: 'production' | 'preview'): Promise<DeploymentRecord | null> {
+    return (await this.listDeployments(projectId, target, 1))[0] ?? null;
+  }
+
+  async listDeployments(projectId: string, target: 'production' | 'preview', limit = 10): Promise<DeploymentRecord[]> {
+    return this.deployments.filter((d) => d.project_id === projectId && d.target === target).slice(0, limit);
+  }
+
 }

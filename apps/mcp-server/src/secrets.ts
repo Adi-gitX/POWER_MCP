@@ -31,7 +31,9 @@ export interface SecretRecord {
 
 export interface PendingRequest {
   token: string;
-  project_id: string;
+  user_id: string;
+  /** null means the value belongs to the account rather than one project. */
+  project_id: string | null;
   name: string;
   env: SecretEnv;
   provider: string | null;
@@ -52,6 +54,8 @@ export interface SecretStore {
   valuesFor(projectId: string, env: 'workbench' | 'live'): Promise<Record<string, string>>;
   /** Every value in the project, for the scrubber. */
   allValues(projectId: string): Promise<string[]>;
+  /** An account-level credential, such as a hosting token, shared across projects. */
+  accountValue(userId: string, name: string): Promise<string | null>;
 }
 
 export function fingerprint(value: string): string {
@@ -94,14 +98,22 @@ export class MemorySecrets implements SecretStore {
       fingerprint: fingerprint(value),
       set_at: new Date().toISOString(),
     };
-    const byName = this.records.get(p.project_id) ?? new Map();
+    const bucket = p.project_id ?? `account:${p.user_id}`;
+    const byName = this.records.get(bucket) ?? new Map();
     byName.set(`${p.name}:${p.env}`, { record, value });
-    this.records.set(p.project_id, byName);
+    this.records.set(bucket, byName);
     return record;
   }
 
   async list(projectId: string): Promise<SecretRecord[]> {
     return [...(this.records.get(projectId)?.values() ?? [])].map((r) => r.record);
+  }
+
+  async accountValue(userId: string, name: string): Promise<string | null> {
+    for (const [key, entry] of this.records.get(`account:${userId}`) ?? []) {
+      if (key.startsWith(`${name}:`)) return entry.value;
+    }
+    return null;
   }
 
   async valuesFor(projectId: string, env: 'workbench' | 'live'): Promise<Record<string, string>> {
