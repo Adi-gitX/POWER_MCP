@@ -1,10 +1,10 @@
 # Power
 
-**An MCP server that builds, checks and hosts full-stack apps — where the model's work is graded by code before a person ever sees it.**
+**An MCP server that builds, checks and hosts full-stack apps — where code execution and automated gates verify work before production.**
 
 You bring the model. Claude, ChatGPT, Cursor, anything that speaks MCP. Power brings the workbench, the database, the secrets, the deterministic gates and the hosting. Inference runs on the subscription you already pay for, so there is no token markup; you are metered on build actions instead.
 
-The structural difference from every other AI app builder is one sentence: **the AI cannot mark its own homework.**
+The structural difference from every other AI app builder is simple: **every build step is deterministically verified and validated by real code.**
 
 ```
 intake → research → research_review → spec → spec_approval → build → verify → done
@@ -105,7 +105,7 @@ A pnpm workspace. Four libraries, two apps.
 |---|---|
 | `packages/gates` | Deterministic validators for `research.json`, `SPEC.md`, `verification.json` and schema migrations. Pure functions. Every failure names the artifact, the field, a stable rule id, and what would satisfy it. |
 | `packages/runstate` | The phase machine. A pure reducer over a plain object, reloaded from storage on every call. Retries are counted, capped at two, then the run blocks and asks a person. |
-| `packages/protocol` | The response envelope, the 52-tool registry, the guard that decides what is legal right now, `next_action` derivation, and the plan limits. The part everything else rests on. |
+| `packages/protocol` | The response envelope, the tool registry, the guard that decides what is legal right now, `next_action` derivation, and the plan limits. The part everything else rests on. |
 | `packages/sdk` | `@power/sdk`, what a generated app imports. `PowerAdapter` and `SelfHostAdapter` behind one interface, so an exported project runs unchanged off our infrastructure. |
 | `apps/mcp-server` | The server: Streamable HTTP MCP endpoint, tool handlers, git-backed sandbox, Postgres control plane with forced row-level security (PGlite locally), the database driver with live and workbench branches, metering, secrets, async jobs, and the browser companion. |
 | `apps/site` | The product site: landing, pricing, docs, proof. Next.js 15, React 19, statically exported. Reads the tool registry, the plan limits and the committed eval transcripts at build time, so it cannot claim something the server does not do. |
@@ -173,7 +173,7 @@ Two properties fall out of this shape:
 
 **Secrets never touch the conversation.** `request_secret` returns a single-use browser form. The value is injected into the sandbox as an environment variable, scoped to workbench or live, and a scrubber redacts every known value from every tool result — including a `console.log(process.env)` in the user's own tests. — `apps/mcp-server/src/secrets.ts`
 
-**Git is the substrate.** Checkpoints are commits with `Power-*` trailers at gate boundaries. Restore is `reset --hard`. Publish is a tag plus a clean clone. Rollback re-tags the previous release. Export is a `git bundle` with full history, and the template ships `.env.example` and `docker-compose.yml` so the export has somewhere to run. — `apps/mcp-server/src/sandbox.ts`
+**Git is the substrate.** Checkpoints are commits with `Power-*` trailers at gate boundaries. Restore is `reset --hard`. Publish deploys the files at a tag, so a release can only contain committed work. Rollback promotes the previous deployment. Export is a `git bundle` with full history, and the template ships `.env.example` and `docker-compose.yml` so the export has somewhere to run. — `apps/mcp-server/src/sandbox.ts`
 
 **Tenant isolation is a database policy, not application discipline.** Every control-plane table has forced row-level security keyed to a session setting. Child tables are scoped by project *ownership*, which the test suite proves by attempting a cross-tenant write. — `apps/mcp-server/src/pgstore.ts`
 
@@ -181,7 +181,7 @@ Two properties fall out of this shape:
 
 ## The tool registry
 
-52 tools. 16 are free and 36 are metered; 11 run as async jobs you poll with `get_job`; 4 can touch the live app.
+42 tools. 16 are free and 26 are metered; 10 run as async jobs you poll with `get_job`; 4 can touch the live app.
 
 Defined once in `packages/protocol/src/tools.ts`, which is also what the docs page renders, so the documentation cannot drift from what the server enforces.
 
@@ -322,7 +322,7 @@ Quota lives in memory locally and moves to Redis by setting `REDIS_URL`.
 - **Child tables are scoped by project ownership**, so a tenant cannot attach a row to another tenant's project. `infra.test.ts` proves it by trying.
 - **Secrets never enter the transcript.** Single-use browser form, env injection scoped to workbench or live, and a scrubber over every outgoing payload that catches even a `console.log(process.env)` inside the user's own tests.
 - **Destructive data changes need a typed project name**, and a new proposal invalidates any earlier confirmation.
-- **Bearer auth** switches on with `POWER_TOKENS`; without it the server runs in dev auth, which is for local use only.
+- **OAuth 2.1** is the real path, with static bearer tokens available alongside it for scripts. There is no open default: the server refuses to start with no way to authenticate at all, and dev auth needs an explicit flag, runs only on loopback, and declines any request that presented a credential.
 
 ---
 
@@ -370,7 +370,13 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 | `PORT` | `4321` | HTTP port for the MCP endpoint and the companion |
 | `POWER_BASE_URL` | `http://localhost:$PORT` | Origin used to build approval and secret URLs |
 | `POWER_LOCAL_ROOT` | a local data directory | Where sandboxes and the control plane live |
-| `POWER_TOKENS` | unset | `tok:alice:pro,tok:bob:free` switches on bearer auth |
+| `POWER_ISSUER_URL` | `POWER_BASE_URL` | The OAuth issuer and the origin every discovery document points at |
+| `POWER_MCP_URL` | `<issuer>/mcp` | Must equal the URL a person types into their client, byte for byte |
+| `POWER_SECRET_KEY` | required off loopback | 32 bytes, base64. Secrets are encrypted at rest and there is no safe default |
+| `POWER_DEPLOYER` | unset | `local` writes releases to disk and serves them; otherwise deploys to the user's hosting account |
+| `POWER_DEV_AUTH` | unset | `1` authenticates every credential-less request as a dev user. Loopback only, and it declines anything that did present a credential |
+| `POWER_DEV_LOGIN` | unset | `1` enables a browser sign-in with no email round trip, for CI |
+| `POWER_TOKENS` | unset | `tok:alice:pro,tok:bob:free` adds static bearer tokens alongside OAuth |
 | `REDIS_URL` | unset | Moves quota accounting from memory to Redis |
 | `STRIPE_SECRET_KEY` | unset | Billing integration |
 | `SITE_URL` | `https://power.build` | Canonical origin for the built site |
@@ -385,11 +391,22 @@ Everything below is behind an interface, so the hosted version is a swap rather 
 |---|---|
 | `LocalSandbox` — a directory and a git repo per project | Fly Machines: one app per project, `workbench` and `prod` machines, in-VM agent daemon |
 | `PgliteDriver` — branches are directory copies | Neon: one project per project, copy-on-write branches |
-| `openPgliteControlPlane` | Managed Postgres, same schema and same RLS |
-| `MemorySecrets` | Envelope-encrypted store with a per-project egress allowlist |
+| `openPgliteControlPlane` | **Done.** `openPgControlPlane` runs the same schema and the same policies on any Postgres |
+| ~~`MemorySecrets`~~ | **Done.** AES-256-GCM in Postgres, per account or per project. A per-project egress allowlist is still to come |
 | `MemoryQuota` / `FileLedger` | Redis (`RedisQuota` already exists) / Postgres ledger |
-| `DevAuthenticator` / `TokenAuthenticator` | OAuth 2.1 with dynamic client registration via a vendor IdP |
+| ~~`DevAuthenticator`~~ removed as a default | **Done.** OAuth 2.1 with dynamic client registration, PKCE S256, consent and rotating refresh tokens, served by Power itself |
 | `Jobs` (in-process) | A queue and a jobs table |
+
+## Publishing
+
+`publish_app` deploys to **the end user's own hosting account**, with a token they
+paste into a single-use browser form. Power operates no hosting, so what someone
+is left with is an app on infrastructure they own and can keep without us.
+
+Locally, `POWER_DEPLOYER=local` writes the release to disk and serves it, so a
+publish produces a URL you can open with no account at all. It is selected
+explicitly and never by falling back: a publish that silently went nowhere real
+is the failure this path exists to remove.
 
 ## Not started
 

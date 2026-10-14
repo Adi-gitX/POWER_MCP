@@ -19,6 +19,9 @@
  * `POWER_ENV` is set only inside Power's sandboxes.
  */
 import pg from 'pg';
+import { createAuth, type Auth } from './auth.js';
+import { createJobs, type Jobs } from './jobs.js';
+import { s3ConfigFromEnv, s3Storage } from './storage-s3.js';
 
 export type Environment = 'workbench' | 'live' | 'self-hosted';
 
@@ -77,6 +80,18 @@ export interface Adapter {
   db: Db;
   storage: Storage;
   email: Email;
+  /**
+   * Sign-in for the app's own users. Call `auth.migrate()` once at startup;
+   * it is idempotent. Everything it owns lives in the app's own database, so
+   * an exported app keeps working with nothing to re-wire.
+   */
+  auth: Auth;
+  /**
+   * Background and scheduled work. Call `jobs.migrate()` once at startup and
+   * `jobs.start()` in whichever process should run them; it is the same
+   * database either way, so a web process can enqueue work a worker runs.
+   */
+  jobs: Jobs;
 }
 
 export interface AdapterOptions {
@@ -103,8 +118,14 @@ export function PowerAdapter(options: AdapterOptions = {}): Adapter {
   return {
     env: environment,
     db: (options.makeDb ?? ((url) => new PgDb(url)))(required(env, 'DATABASE_URL')),
-    storage: (options.makeStorage ?? defaultStorage)({ kind: 'power', env }),
+    storage: (options.makeStorage ?? defaultStorage)({ kind: env.S3_BUCKET ? 's3' : 'power', env }),
     email: (options.makeEmail ?? defaultEmail)({ kind: 'power', env }),
+    get auth() {
+      return createAuth(this.db, this.email);
+    },
+    get jobs() {
+      return createJobs(this.db);
+    },
   };
 }
 
@@ -123,6 +144,12 @@ export function SelfHostAdapter(options: AdapterOptions = {}): Adapter {
     db: (options.makeDb ?? ((url) => new PgDb(url)))(required(env, 'DATABASE_URL')),
     storage: (options.makeStorage ?? defaultStorage)({ kind: env.S3_BUCKET ? 's3' : 'fs', env }),
     email: (options.makeEmail ?? defaultEmail)({ kind: env.RESEND_API_KEY ? 'resend' : 'console', env }),
+    get auth() {
+      return createAuth(this.db, this.email);
+    },
+    get jobs() {
+      return createJobs(this.db);
+    },
   };
 }
 
@@ -145,10 +172,12 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
 // ---------------------------------------------------------------- default drivers
 
 function defaultStorage({ kind, env }: { kind: 'power' | 's3' | 'fs'; env: NodeJS.ProcessEnv }): Storage {
-  if (kind === 'fs' || kind === 'power') return fsStorage(env.STORAGE_DIR ?? './data/storage');
-  // S3-compatible (R2, MinIO, S3). Kept out of v0 on purpose: the interface is
-  // what matters, and fs storage behind a volume is enough to prove export works.
-  throw new Error('S3 storage driver is not included in this build; set STORAGE_DIR to use local storage.');
+  // S3-compatible covers R2, MinIO and S3 itself. The caller decides which
+  // driver it wants rather than this falling back to one, because silently
+  // writing uploads to a container's local disk when the bucket was
+  // misconfigured loses them at the next deploy with nothing in the logs.
+  if (kind === 's3') return s3Storage(s3ConfigFromEnv(env));
+  return fsStorage(env.STORAGE_DIR ?? './data/storage');
 }
 
 function fsStorage(dir: string): Storage {
@@ -217,3 +246,40 @@ function defaultEmail({ kind, env }: { kind: 'power' | 'resend' | 'console'; env
     },
   };
 }
+
+export {
+  JOBS_SCHEMA_SQL,
+  JobsError,
+  backoffMs,
+  createJobs,
+  nextCronTime,
+  parseCron,
+  parseSchedule,
+  type JobContext,
+  type JobHandler,
+  type JobRun,
+  type JobState,
+  type Jobs,
+  type JobsOptions,
+  type ScheduleSpec,
+} from './jobs.js';
+
+export {
+  presignGetUrl,
+  s3ConfigFromEnv,
+  s3Storage,
+  type S3Config,
+  type S3StorageOptions,
+} from './storage-s3.js';
+
+export {
+  AUTH_SCHEMA_SQL,
+  AuthError,
+  clearSessionCookie,
+  createAuth,
+  readSessionCookie,
+  sessionCookie,
+  type Auth,
+  type AuthUser,
+  type Session,
+} from './auth.js';
