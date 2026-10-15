@@ -49,8 +49,30 @@ async function call(name: string, args: Record<string, unknown> = {}): Promise<E
   return { ...payload, isError: Boolean(result.isError) };
 }
 
-async function post(path: string): Promise<number> {
-  const res = await fetch(`${BASE}${path}`, { method: 'POST', redirect: 'manual', body: 'reason=e2e' });
+/**
+ * Submit one of the human-decision forms the way a browser does.
+ *
+ * These four endpoints authorise the things an assistant may not do for
+ * itself, so they require a token Power minted for this person and this
+ * project, and an Origin header saying the request came from Power's own
+ * pages. Reading the token off the page rather than constructing one is the
+ * point: it is the same path a person takes.
+ */
+async function csrfToken(projectId: string): Promise<string> {
+  const page = await (await fetch(`${BASE}/projects/${projectId}`)).text();
+  const match = /name="csrf" value="([^"]+)"/.exec(page);
+  if (!match) throw new Error(`no csrf token on the page for ${projectId}`);
+  return match[1]!;
+}
+
+async function submit(projectId: string, sub: string, fields: Record<string, string> = {}): Promise<number> {
+  const body = new URLSearchParams({ csrf: await csrfToken(projectId), ...fields });
+  const res = await fetch(`${BASE}/projects/${projectId}/${sub}`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE },
+    body,
+  });
   return res.status;
 }
 
@@ -85,7 +107,7 @@ WHEN shout is called with a name, THE SYSTEM SHALL return the greeting in upper 
 Pure functions, no I/O.
 
 ## Architecture
-One module, src/app.ts.
+One module, src/tip.ts.
 
 ## Data Model
 None.
@@ -114,7 +136,7 @@ export function shout(name: string): string {
 `;
 
 const TEST = `import { expect, it } from 'vitest';
-import { greet, shout } from './app.js';
+import { greet, shout } from './tip.js';
 
 it('greets', () => {
   expect(greet('Ada')).toBe('Hello, Ada');
@@ -154,7 +176,7 @@ const FAIL_REPORT = JSON.stringify({
   issues: [
     {
       severity: 'major',
-      where: 'src/app.ts',
+      where: 'src/tip.ts',
       problem: 'shout does not append an exclamation mark.',
       expected: 'shout("Ada") returns "HELLO, ADA!".',
     },
@@ -199,14 +221,14 @@ const beforeApproval = await call('write_file', { project_id: pid, path: 'src/x.
 step('writing before approval is refused and explains why', beforeApproval.ok === false && /approve/i.test(beforeApproval.message ?? ''), beforeApproval.message);
 
 console.log('\n— human approves in the browser');
-step('approve-spec endpoint accepts', (await post(`/projects/${pid}/approve-spec`)) === 303);
+step('approve-spec endpoint accepts', (await submit(pid, 'approve-spec')) === 303);
 const afterApproval = await call('get_context', { project_id: pid });
 step('run moves to build', afterApproval.context?.phase === 'build', afterApproval.context);
 step('  …and hands over the implementer brief', Boolean(afterApproval.guidance?.includes('IMPLEMENTER')));
 
 console.log('\n— build');
-const w1 = await call('write_file', { project_id: pid, path: 'src/app.ts', content: APP });
-const w2 = await call('write_file', { project_id: pid, path: 'src/app.test.ts', content: TEST });
+const w1 = await call('write_file', { project_id: pid, path: 'src/tip.ts', content: APP });
+const w2 = await call('write_file', { project_id: pid, path: 'src/tip.test.ts', content: TEST });
 step('writes are admitted and billed', w1.ok && w2.ok && w1.billed === true, w1);
 
 const tooEarly = await call('publish_app', { project_id: pid });
@@ -307,10 +329,10 @@ step('  …open failures are cleared', verified.context?.open_gate_failures.leng
 
 const unconfirmedPromote = await call('promote_migration', { project_id: pid });
 step('a destructive promote is refused without a typed confirmation', unconfirmedPromote.ok === false && unconfirmedPromote.reason === 'needs_user_input', unconfirmedPromote);
-const wrongWord = await fetch(`${BASE}/projects/${pid}/confirm-migration`, { method: 'POST', redirect: 'manual', body: 'confirm=yes', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-step('  …a button-press ("yes") is not enough', wrongWord.status === 400, wrongWord.status);
-const rightWord = await fetch(`${BASE}/projects/${pid}/confirm-migration`, { method: 'POST', redirect: 'manual', body: 'confirm=bakery-greeter', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-step('  …typing the project name is', rightWord.status === 303, rightWord.status);
+const wrongWord = await submit(pid, 'confirm-migration', { confirm: 'yes' });
+step('  …a button-press ("yes") is not enough', wrongWord === 400, wrongWord);
+const rightWord = await submit(pid, 'confirm-migration', { confirm: 'bakery-greeter' });
+step('  …typing the project name is', rightWord === 303, rightWord);
 
 const promoted = await call('promote_migration', { project_id: pid });
 step('promote_migration applies the gate-passed change to live, with a snapshot', promoted.ok && promoted.data?.promoted === true && String(promoted.data?.snapshot).startsWith('snap_'), promoted);
@@ -319,18 +341,116 @@ step('  …live now has the table', (liveAfter.data?.tables as { name: string }[
 const twice = await call('promote_migration', { project_id: pid });
 step('  …and cannot be promoted twice', twice.isError && /already promoted/.test(JSON.stringify(twice)), twice);
 
+console.log('\n— the two human decisions cannot be forged');
+/**
+ * Approving a plan and confirming a change to the live app are the only things
+ * Power will not let an assistant do for itself, and both were plain POST
+ * forms with no token and no origin check. Any page in a logged-in browser
+ * could submit them, which made the product's central claim true only for as
+ * long as nobody tried.
+ */
+const raw = await fetch(`${BASE}/projects/${pid}/confirm-publish`, {
+  method: 'POST',
+  redirect: 'manual',
+  headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE },
+  body: '',
+});
+step('a confirmation with no token is refused', raw.status === 403, raw.status);
+
+const fromElsewhere = await fetch(`${BASE}/projects/${pid}/confirm-publish`, {
+  method: 'POST',
+  redirect: 'manual',
+  headers: {
+    'content-type': 'application/x-www-form-urlencoded',
+    origin: 'https://evil.example',
+    'sec-fetch-site': 'cross-site',
+  },
+  body: new URLSearchParams({ csrf: await csrfToken(pid) }),
+});
+step('  …and so is one from another site, even holding a real token', fromElsewhere.status === 403, fromElsewhere.status);
+
+const borrowed = await fetch(`${BASE}/projects/${pid}/confirm-publish`, {
+  method: 'POST',
+  redirect: 'manual',
+  headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE },
+  body: new URLSearchParams({ csrf: (await csrfToken(pid)).replace(/.$/, 'X') }),
+});
+step('  …and a tampered token does not pass', borrowed.status === 403, borrowed.status);
+
+console.log('\n— the app actually runs');
+/**
+ * The gap this closes, and the reason it is here rather than in a unit test:
+ * Power could provision branches, rehearse migrations and promote them while
+ * the application being built could reach none of it. Nothing set DATABASE_URL
+ * for a project, so the preview served its page and every /api call failed.
+ *
+ * So this exercises the generated app the way a person does -- through Power's
+ * own origin, over HTTP, signing up and storing a row -- because that is the
+ * only thing that proves the two halves of the product are joined.
+ */
+const preview = await call('get_preview_url', { project_id: pid });
+step('get_preview_url starts the project and reports ready', preview.ok && preview.data?.state === 'ready', preview.data ?? preview);
+
+const previewUrl = `${BASE}/preview/${pid}`;
+const page = await fetch(`${previewUrl}/`);
+step('  …its page is served on Power’s origin', page.status === 200 && /text\/html/.test(page.headers.get('content-type') ?? ''), page.status);
+
+// Anonymous first: the app's own gate, not Power's.
+const anon = await fetch(`${previewUrl}/api/items`);
+step('  …the app refuses its data to a stranger', anon.status === 401, anon.status);
+
+const jar = async (res: Response): Promise<string> => (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+const signup = await fetch(`${previewUrl}/api/signup`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ email: 'ada@example.com', password: 'correct horse battery' }),
+});
+const cookie = await jar(signup);
+step('signing up inside the generated app works', signup.status === 200 && cookie.startsWith('session='), signup.status);
+step('  …which means it reached a real database', (await signup.clone().json().catch(() => ({}))) !== null);
+
+const added = await fetch(`${previewUrl}/api/items`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', cookie },
+  body: JSON.stringify({ title: 'first item' }),
+});
+step('adding a row through the app succeeds', added.status === 200, added.status);
+
+const listed = await fetch(`${previewUrl}/api/items`, { headers: { cookie } });
+const listedBody = (await listed.json()) as { items?: { title: string }[] };
+step('  …and reading it back returns what was written', listedBody.items?.[0]?.title === 'first item', listedBody);
+
+// The platform and the app are looking at one database, not two.
+const seenByPower = await call('query_database', { project_id: pid, sql: 'select title from items' });
+step('  …and Power sees the same row the app wrote', /first item/.test(JSON.stringify(seenByPower.data)), seenByPower.data);
+
 console.log('\n— ship');
 const unconfirmed = await call('publish_app', { project_id: pid });
 step('publish without browser confirmation is refused', unconfirmed.ok === false && unconfirmed.reason === 'needs_user_input', unconfirmed.reason);
 step('  …and says the chat cannot confirm it', /browser/i.test(unconfirmed.message ?? ''));
 
-step('confirm-publish endpoint accepts', (await post(`/projects/${pid}/confirm-publish`)) === 303);
+step('confirm-publish endpoint accepts', (await submit(pid, 'confirm-publish')) === 303);
 const published = await call('publish_app', { project_id: pid });
 step('publish succeeds', published.ok && published.data?.version === 'v1', published);
 step('  …and the run is done', published.context?.phase === 'done');
 
 const again = await call('publish_app', { project_id: pid });
 step('a second publish needs a fresh confirmation (one-shot)', again.ok === false, again.reason);
+
+/**
+ * Taking the live app offline is the most destructive thing Power does on a
+ * user's behalf, and it was the one live-capable tool that needed nobody's
+ * consent: the guard handed it a literal true.
+ */
+const unconfirmedTakedown = await call('unpublish_app', { project_id: pid });
+step('taking the app offline is refused without a browser confirmation', unconfirmedTakedown.ok === false && unconfirmedTakedown.reason === 'needs_user_input', unconfirmedTakedown.reason);
+step('  …and says the chat cannot confirm it', /browser/i.test(unconfirmedTakedown.message ?? ''));
+
+const takedownButton = await submit(pid, 'confirm-unpublish', { confirm: 'yes' });
+step('  …a button-press is not enough; the name has to be typed', takedownButton === 400, takedownButton);
+
+// Deliberately not carried through to an actual unpublish: the run below
+// depends on this project still being live.
 
 console.log('\n— the second hour: a new run on a shipped project');
 const staleWrite = await call('write_file', { project_id: pid, path: 'src/z.ts', content: 'z' });
