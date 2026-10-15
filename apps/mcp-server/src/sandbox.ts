@@ -14,6 +14,7 @@
 import { spawn } from 'node:child_process';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { template } from './template.js';
 
 export interface CommandResult {
   ok: boolean;
@@ -35,6 +36,11 @@ export interface SearchHit {
   text: string;
 }
 
+export interface SandboxFile {
+  path: string;
+  size: number;
+}
+
 export interface Sandbox {
   create(projectId: string, slug: string): Promise<void>;
   listFiles(projectId: string, dir?: string): Promise<string[]>;
@@ -52,6 +58,15 @@ export interface Sandbox {
   listCheckpoints(projectId: string): Promise<Checkpoint[]>;
   restore(projectId: string, checkpointId: string): Promise<void>;
   diff(projectId: string, from: string, to?: string): Promise<string>;
+
+  /** Tag the current workbench as a release, without materialising anything. */
+  tagRelease(projectId: string): Promise<{ version: string }>;
+  /** The committed file list at a ref. Reads the git index, so ignored files are absent. */
+  filesAt(projectId: string, ref: string): Promise<SandboxFile[]>;
+  /** One committed file at a ref, as raw bytes. Safe for binaries. */
+  readAt(projectId: string, ref: string, path: string): Promise<Buffer>;
+  /** The current commit, used to cache a preview against the code it was built from. */
+  headCommit(projectId: string): Promise<string>;
 
   /** Tag the current workbench as a release and materialise it as the live copy. */
   publish(projectId: string): Promise<{ version: string; live_path: string }>;
@@ -108,7 +123,13 @@ export class LocalSandbox implements Sandbox {
     }
     await this.git(projectId, ['init', '-q', '-b', 'work']);
     // Dependencies first, so the initial checkpoint is a project that typechecks.
-    const install = await this.run(projectId, ['pnpm', 'install', '--silent']);
+    //
+    // --ignore-workspace matters more than it looks. A project lives under the
+    // server's data directory, which may itself sit inside a pnpm workspace;
+    // without this, pnpm applies the outer workspace's rules, installs nothing,
+    // and the project only appears to work because Node resolves the outer
+    // repository's modules up the tree. Exported somewhere else, it breaks.
+    const install = await this.run(projectId, ['pnpm', 'install', '--silent', '--ignore-workspace']);
     if (!install.ok) {
       const fallback = await this.run(projectId, ['npm', 'install', '--silent', '--no-audit']);
       if (!fallback.ok) throw new SandboxError(`dependency install failed: ${fallback.stderr}`);
@@ -284,6 +305,59 @@ export class LocalSandbox implements Sandbox {
     return result.stdout;
   }
 
+  async tagRelease(projectId: string): Promise<{ version: string }> {
+    const tags = await this.git(projectId, ['tag', '--list', 'v*']);
+    const next = tags.stdout.split('\n').filter(Boolean).length + 1;
+    const version = `v${next}`;
+    await this.git(projectId, ['tag', version]);
+    return { version };
+  }
+
+  async headCommit(projectId: string): Promise<string> {
+    const result = await this.git(projectId, ['rev-parse', 'HEAD']);
+    return result.stdout.trim();
+  }
+
+  /**
+   * The files a release contains, read from the git index rather than the
+   * working directory, so a deploy can only ever contain committed work and
+   * never node_modules or a stray build artifact.
+   */
+  async filesAt(projectId: string, ref: string): Promise<SandboxFile[]> {
+    const result = await this.git(projectId, ['ls-tree', '-r', '--long', ref]);
+    if (!result.ok) throw new SandboxError(`could not list files at ${ref}`);
+    const files: SandboxFile[] = [];
+    for (const line of result.stdout.split('\n')) {
+      // <mode> blob <sha> <size>\t<path>
+      const match = /^\S+\s+blob\s+\S+\s+(\d+)\t(.+)$/.exec(line);
+      if (match) files.push({ size: Number(match[1]), path: match[2]! });
+    }
+    return files;
+  }
+
+  /**
+   * `run()` buffers stdout as a string and truncates it, which would corrupt
+   * anything that is not UTF-8 text and silently truncate anything large, so
+   * this spawns directly and keeps the bytes.
+   */
+  async readAt(projectId: string, ref: string, path: string): Promise<Buffer> {
+    return new Promise((resolvePromise, reject) => {
+      const child = spawn('git', ['show', `${ref}:${path}`], {
+        cwd: this.dir(projectId),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const out: Buffer[] = [];
+      let err = '';
+      child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+      child.stderr.on('data', (chunk: Buffer) => { err += chunk.toString(); });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        if (code === 0) resolvePromise(Buffer.concat(out));
+        else reject(new SandboxError(`could not read ${path} at ${ref}: ${err.trim() || `exit ${code}`}`));
+      });
+    });
+  }
+
   async publish(projectId: string): Promise<{ version: string; live_path: string }> {
     const tags = await this.git(projectId, ['tag', '--list', 'v*']);
     const next = tags.stdout.split('\n').filter(Boolean).length + 1;
@@ -354,90 +428,3 @@ function tail(text: string, max = 8000): string {
   return text.length > max ? `…(${text.length - max} chars truncated)\n${text.slice(-max)}` : text;
 }
 
-/**
- * The v0 template: the smallest project that typechecks, has a test, and is a
- * git repo. The real template (Vite + React + server.ts + @power/sdk with both
- * adapters) replaces this; the handlers do not care which one is here.
- */
-function template(slug: string): Record<string, string> {
-  return {
-    'package.json': `${JSON.stringify(
-      {
-        name: slug,
-        private: true,
-        type: 'module',
-        scripts: {
-          typecheck: 'tsc --noEmit -p .',
-          test: 'vitest run',
-        },
-        devDependencies: {
-          '@types/node': '^22.10.0',
-          typescript: '^5.7.0',
-          vitest: '^2.1.0',
-        },
-      },
-      null,
-      2,
-    )}\n`,
-    'tsconfig.json': `${JSON.stringify(
-      {
-        compilerOptions: {
-          target: 'ES2023',
-          module: 'NodeNext',
-          moduleResolution: 'NodeNext',
-          strict: true,
-          noEmit: true,
-          skipLibCheck: true,
-          types: ['node'],
-        },
-        include: ['src'],
-      },
-      null,
-      2,
-    )}\n`,
-    'vitest.config.ts': `import { defineConfig } from 'vitest/config';\n\nexport default defineConfig({ css: { postcss: {} } });\n`,
-    '.gitignore': 'node_modules/\ndist/\n.env\ndata/\n',
-    'README.md': `# ${slug}
-
-Built with Power. This is a real git repository: every checkpoint is a commit.
-
-## Run it anywhere
-
-\`\`\`sh
-cp .env.example .env      # local values already filled in
-docker compose up -d      # Postgres, object storage, a mail catcher
-pnpm install && pnpm test
-\`\`\`
-
-Nothing in this project depends on Power at runtime. Inside Power the same code
-reads the connection details Power injects; outside, it reads \`.env\`.
-`,
-    // The exported shape, present from day one so "runs anywhere" is a property
-    // of the template rather than a promise about a future export step.
-    '.env.example': `# Local values that work with docker-compose.yml out of the box.
-DATABASE_URL=postgres://app:app@localhost:5432/app
-STORAGE_DIR=./data/storage
-
-# Optional. Without RESEND_API_KEY, outgoing mail is printed to stdout.
-# RESEND_API_KEY=
-# MAIL_FROM=app@example.com
-`,
-    'docker-compose.yml': `services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: app
-    ports: ["5432:5432"]
-    volumes: ["pgdata:/var/lib/postgresql/data"]
-  mail:
-    image: axllent/mailpit
-    ports: ["8025:8025", "1025:1025"]
-volumes:
-  pgdata:
-`,
-    'src/app.ts': `export function greet(name: string): string {\n  return \`Hello, \${name}\`;\n}\n`,
-    'src/app.test.ts': `import { expect, it } from 'vitest';\nimport { greet } from './app.js';\n\nit('greets', () => {\n  expect(greet('world')).toBe('Hello, world');\n});\n`,
-  };
-}
