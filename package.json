@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm test",
+    "test:postgres": "node scripts/test-postgres.mjs",
     "clean": "tsc --build --clean",
     "dev": "pnpm --filter @power/mcp-server dev",
     "e2e": "pnpm --filter @power/mcp-server e2e",

@@ -6,6 +6,18 @@ export default defineConfig({
   css: { postcss: {} },
   test: {
     include: ['packages/**/*.test.ts', 'apps/**/*.test.ts'],
+    // PGlite is a real Postgres, and several suites now start their own
+    // instance. Provisioning two database branches genuinely takes seconds, so
+    // the 5s default made that test pass or fail on machine load rather than
+    // on whether the code works.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
+    // Each PGlite instance carries its own WASM Postgres, and several suites
+    // start more than one. Run two files at a time rather than one per core:
+    // unbounded parallelism was being killed outright by the OOM killer on a
+    // laptop, which looks exactly like a failing test and is not one.
+    pool: 'forks',
+    poolOptions: { forks: { maxForks: 2, minForks: 1 } },
     // `.power-local` is the local sandbox: every generated project lives there
     // with its own app.test.ts and leak.test.ts. Those belong to the apps the
     // server built, not to this repo, and without this exclude the suite grows
