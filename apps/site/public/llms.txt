@@ -1,0 +1,39 @@
+# Power
+
+> An MCP server that builds and publishes real web applications. The user's own
+> AI assistant drives the build; Power supplies the workspace, the database, a
+> preview, and gates enforced in code rather than requested in a prompt.
+
+Power pays for no inference. The assistant connected to it does the reasoning,
+so the person building pays only for the subscription they already have.
+
+## Connecting
+
+Streamable HTTP with OAuth 2.1, dynamic client registration and PKCE.
+
+    claude mcp add --transport http power https://mcp.usepower.dev/mcp
+
+## What is different about it
+
+- Refusals are successful responses with `ok: false`. They name the rule that
+  was broken, the remedy, and the next tool to call. They are never billed.
+- A run moves through phases. A tool called out of order is refused rather than
+  executed. Every retry loop is counted and capped at two, after which the run
+  stops and asks a person.
+- No tool runs arbitrary SQL against a live database. A schema change is
+  rehearsed on a throwaway copy, judged by a gate, and must be reversible
+  before it can be promoted. Promotion snapshots live first.
+- Two decisions require a person in a browser and cannot be made from chat:
+  approving the plan, and confirming anything that reaches the live app.
+- `export_project` returns a real git repository with its full history. It is
+  free, permanently.
+
+## Pages
+
+- [Docs](https://usepower.dev/docs/): tools, phases, gates
+- [Getting started](https://usepower.dev/docs/getting-started/): connecting a client
+- [How it works](https://usepower.dev/docs/how-it-works/): the run state machine
+- [Tools](https://usepower.dev/docs/tools/): the full tool list and annotations
+- [Proof](https://usepower.dev/proof/): evaluation runs against a real model
+- [Pricing](https://usepower.dev/pricing/)
+- [Privacy](https://usepower.dev/privacy/) and [Terms](https://usepower.dev/terms/)
