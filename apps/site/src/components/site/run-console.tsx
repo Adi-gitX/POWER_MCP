@@ -19,6 +19,16 @@ export function RunConsole() {
   const bodyRef = useRef<HTMLDivElement>(null);
   const started = steps.length > 0;
 
+  /* Run one on its own shortly after load.
+     The console is the hero's main visual, and it used to open on "Nothing
+     running yet." — a dead terminal as the first thing a visitor sees. It now
+     demonstrates itself, and typing still takes over at any point. */
+  useEffect(() => {
+    if (started || idea) return;
+    const id = setTimeout(() => setSteps(buildScript(PLACEHOLDERS[0])), reduced ? 300 : 1400);
+    return () => clearTimeout(id);
+  }, [started, idea, reduced]);
+
   /* cycle the placeholder until someone types */
   useEffect(() => {
     if (started || idea) return;
@@ -62,7 +72,7 @@ export function RunConsole() {
     <div>
       <form
         onSubmit={(e) => { e.preventDefault(); start(idea || placeholder); }}
-        className="mx-auto flex w-full max-w-[38rem] items-center gap-2 rounded-2xl border border-white/45 bg-white/30 p-2 shadow-[0_18px_50px_-28px_rgba(16,40,90,0.65)] backdrop-blur-md"
+        className="flex w-full max-w-[38rem] items-center gap-2 rounded-2xl border border-brightline/45 bg-surface/30 p-2 shadow-[0_18px_50px_-28px_rgba(16,40,90,0.65)] backdrop-blur-md"
       >
         <label htmlFor="idea" className="sr-only">What do you want to build?</label>
         <input
@@ -71,35 +81,35 @@ export function RunConsole() {
           onChange={(e) => setIdea(e.target.value)}
           placeholder={placeholder}
           maxLength={120}
-          className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-[1rem] text-white outline-none placeholder:text-white/80"
+          className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-[1rem] text-bright outline-none placeholder:text-bright/80"
         />
         <Button type="submit" size="md" variant="dark" className="shrink-0 rounded-xl">
           Run it <ArrowRight />
         </Button>
       </form>
 
-      <div className="mx-auto mt-6 w-full max-w-[52rem] overflow-hidden rounded-2xl border border-[#23242b] bg-[#101116] shadow-[0_40px_80px_-40px_rgba(25,25,29,0.55)]">
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <span className="mono flex items-center gap-2 text-[0.7rem] uppercase tracking-[0.14em] text-white/40">
+      <div className="mt-6 w-full overflow-hidden rounded-2xl border border-[#23242b] bg-[#101116] shadow-[0_40px_80px_-40px_rgba(25,25,29,0.55)]">
+        <div className="flex items-center justify-between border-b border-brightline/10 px-4 py-3">
+          <span className="mono flex items-center gap-2 text-[0.7rem] uppercase tracking-[0.14em] text-bright/40">
             <span className="flex gap-1.5">
-              <i className="size-2 rounded-full bg-white/20" />
-              <i className="size-2 rounded-full bg-white/20" />
-              <i className="size-2 rounded-full bg-white/20" />
+              <i className="size-2 rounded-full bg-surface/20" />
+              <i className="size-2 rounded-full bg-surface/20" />
+              <i className="size-2 rounded-full bg-surface/20" />
             </span>
             run console
           </span>
           {started && (
-            <button onClick={() => start(idea || placeholder)} className="mono flex items-center gap-1.5 text-[0.7rem] text-white/40 transition-colors hover:text-white/80">
+            <button onClick={() => start(idea || placeholder)} className="mono flex items-center gap-1.5 text-[0.7rem] text-bright/40 transition-colors hover:text-bright/80">
               <RotateCcw className="size-3" /> run again
             </button>
           )}
         </div>
 
-        <div ref={bodyRef} className="mono h-[26rem] space-y-1.5 overflow-y-auto p-4 text-[0.8rem] text-white/70">
+        <div ref={bodyRef} className="mono h-[26rem] space-y-1.5 overflow-y-auto p-4 text-[0.8rem] text-bright/70">
           {!started && (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="font-sans text-[1.05rem] font-semibold text-white">Nothing running yet.</p>
-              <p className="text-[0.78rem] text-white/45">Type what you want to build, or just press Run it.</p>
+              <p className="font-sans text-[1.05rem] font-semibold text-bright">Starting a run…</p>
+              <p className="text-[0.78rem] text-bright/45">Or type your own idea above and press Run it.</p>
             </div>
           )}
 
@@ -120,18 +130,18 @@ export function RunConsole() {
             <motion.div
               initial={{ opacity: 0, y: reduced ? 0 : 8 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue/40 bg-blue/10 p-3"
+              className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/10 p-3"
             >
               <span className="font-sans">
-                <b className="block text-[0.95rem] font-semibold text-white">{waiting.title}</b>
-                <span className="text-[0.82rem] text-white/60">{waiting.sub}</span>
+                <b className="block text-[0.95rem] font-semibold text-bright">{waiting.title}</b>
+                <span className="text-[0.82rem] text-bright/60">{waiting.sub}</span>
               </span>
               <Button onClick={approve} size="sm" className="rounded-lg">{waiting.label}</Button>
             </motion.div>
           )}
 
           {done && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-2 text-[0.74rem] text-white/40">
+            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-2 text-[0.74rem] text-bright/40">
               Run complete. This is a simulation in your browser — the real thing runs inside your own AI.
             </motion.p>
           )}
@@ -143,14 +153,14 @@ export function RunConsole() {
 
 function Line({ step }: { step: Step }) {
   if (step.kind === 'say') {
-    return <p className="py-1 pl-7 font-sans text-[0.88rem] text-white/55 before:-ml-5 before:mr-2 before:text-white/25 before:content-['›']">{step.text}</p>;
+    return <p className="py-1 pl-7 font-sans text-[0.88rem] text-bright/55 before:-ml-5 before:mr-2 before:text-bright/25 before:content-['›']">{step.text}</p>;
   }
   if (step.kind === 'call') {
     return (
       <div className={cn('grid grid-cols-[1.1rem_minmax(0,1fr)_auto] items-baseline gap-x-2.5 rounded-lg px-2 py-1.5', step.state === 'no' && 'border border-dashed border-refuse/40')}>
         <span className={step.state === 'ok' ? 'text-[#6ee7a8]' : 'text-[#fca5a5]'}>{step.state === 'ok' ? '✓' : '×'}</span>
-        <span className="break-words text-white">
-          {step.tool}{step.args && <span className="ml-2 text-white/35">{step.args}</span>}
+        <span className="break-words text-bright">
+          {step.tool}{step.args && <span className="ml-2 text-bright/35">{step.args}</span>}
         </span>
         <span className={cn('text-[0.72rem]', step.state === 'ok' ? 'text-[#6ee7a8]' : 'text-[#fca5a5]')}>{step.status}</span>
       </div>
@@ -160,8 +170,8 @@ function Line({ step }: { step: Step }) {
     return (
       <div className="ml-7 rounded-r-lg border border-l-2 border-[#fca5a5]/30 border-l-[#fca5a5] bg-[#fca5a5]/5 px-3 py-2">
         <b className="font-semibold text-[#fecaca]">{step.rule}</b>
-        <span className="text-white/55"> — {step.text}</span>
-        <small className="mt-1 block text-[0.7rem] text-white/35">{step.foot}</small>
+        <span className="text-bright/55"> — {step.text}</span>
+        <small className="mt-1 block text-[0.7rem] text-bright/35">{step.foot}</small>
       </div>
     );
   }
@@ -169,8 +179,8 @@ function Line({ step }: { step: Step }) {
     return (
       <div className="ml-7 grid gap-1">
         {step.items.map((f) => (
-          <div key={f} className="flex items-baseline gap-2.5 text-white/60">
-            <span className="text-[#6ee7a8]">✓</span><span>write_file</span><span className="text-white/35">{f}</span>
+          <div key={f} className="flex items-baseline gap-2.5 text-bright/60">
+            <span className="text-[#6ee7a8]">✓</span><span>write_file</span><span className="text-bright/35">{f}</span>
           </div>
         ))}
       </div>
@@ -194,8 +204,8 @@ function Line({ step }: { step: Step }) {
   if (step.kind === 'receipt') {
     return (
       <div className="mt-2 rounded-xl border border-[#6ee7a8]/30 bg-[#6ee7a8]/5 p-3 font-sans">
-        <b className="text-[0.95rem] font-semibold text-white">Verification receipt · v1 live</b>
-        <p className="mt-1 text-[0.82rem] text-white/55">13 build actions · 1 refusal (unbilled) · git tag v1 · rollback ready</p>
+        <b className="text-[0.95rem] font-semibold text-bright">Verification receipt · v1 live</b>
+        <p className="mt-1 text-[0.82rem] text-bright/55">13 build actions · 1 refusal (unbilled) · git tag v1 · rollback ready</p>
       </div>
     );
   }
