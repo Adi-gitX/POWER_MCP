@@ -1,0 +1,37 @@
+# TLS, and nothing else.
+#
+# Caddy gets a certificate from Let's Encrypt on first boot and renews it, so
+# there is no certbot and no cron. The only requirement is that POWER_DOMAIN
+# already points at this machine's IP before the stack starts: the challenge is
+# served over port 80, so a domain that does not resolve yet fails and backs
+# off.
+
+{$POWER_DOMAIN}, {$POWER_PREVIEW_HOST} {
+	# Power streams MCP responses, so buffering has to stay off or a long tool
+	# call looks like a hang to the client.
+	reverse_proxy power:8080 {
+		flush_interval -1
+
+		# Power decides what host headers it will answer to and returns 421 on a
+		# mismatch, which is only meaningful if it sees the real one.
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+	}
+
+	encode zstd gzip
+
+	# A preview is someone's half-built app. It must not be framed by another
+	# site, and it must not be cached by anything in between.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

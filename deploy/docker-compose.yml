@@ -1,0 +1,77 @@
+# Power on a single machine, behind HTTPS.
+#
+# This is the whole production stack: Power, and Caddy in front of it to get a
+# certificate and renew it. Nothing else is needed, because the control plane
+# lives in managed Postgres and the only local state is project files.
+#
+# Why one machine rather than a platform-as-a-service: Power spawns a child
+# process per preview and keeps git repositories and database branches on disk.
+# Anything with an ephemeral filesystem loses every project on deploy, and
+# anything that only runs functions cannot spawn the preview at all. That rules
+# out most of what calls itself free hosting, and it is the single constraint
+# worth remembering when choosing where to run this.
+#
+#   docker compose up -d --build
+#
+# Set the environment in a `.env` next to this file. DEPLOY.md lists what goes
+# in it and where each value comes from.
+
+services:
+  power:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: 8080
+      POWER_LOCAL_ROOT: /data
+      # Everything OAuth is derived from this, and it has to be the public
+      # origin rather than the container's. A mismatch here is the single most
+      # common reason a connector fails with nothing useful in any log.
+      POWER_ISSUER_URL: ${POWER_ISSUER_URL}
+      POWER_BASE_URL: ${POWER_ISSUER_URL}
+      POWER_MCP_URL: ${POWER_ISSUER_URL}/mcp
+      POWER_DEPLOYER: ${POWER_DEPLOYER:-vercel}
+      POWER_PREVIEW_HOST: ${POWER_PREVIEW_HOST}
+    volumes:
+      # Projects, their git history, previews and the local database branches.
+      - power-data:/data
+    # Not published to the host: Caddy is the only way in, so the server is
+    # never reachable without TLS.
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      POWER_DOMAIN: ${POWER_DOMAIN}
+      POWER_PREVIEW_HOST: ${POWER_PREVIEW_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here. Without this volume Caddy asks Let's Encrypt
+      # for a new certificate on every restart and hits the rate limit.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      power:
+        condition: service_started
+
+volumes:
+  power-data:
+  caddy-data:
+  caddy-config:

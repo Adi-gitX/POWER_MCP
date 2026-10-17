@@ -1,0 +1,36 @@
+# Keep the build context small and keep local state out of the image.
+#
+# .power-local is the important one: it holds every local project, its git
+# history and its database branches. Copying it into an image would ship
+# somebody's work, and their secrets, to wherever the image goes.
+.power-local
+data
+
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+.git
+.github
+.next
+**/.next
+out
+**/out
+
+# The marketing site is deployed separately and is not part of the server.
+apps/site
+apps/web
+
+.env
+.env.*
+!.env.example
+
+docs
+*.md
+!SETUP.md
+
+.DS_Store
+coverage
