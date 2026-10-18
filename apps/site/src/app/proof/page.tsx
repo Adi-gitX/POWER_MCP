@@ -47,9 +47,9 @@ export default function ProofPage() {
             const calls = p.phase ? t.calls.filter((c) => c.phase === p.phase) : [];
             return (
               <Reveal key={p.n} delay={i * 0.05}>
-                <div className="rounded-[14px] border border-line bg-white p-5">
+                <div className="rounded-[14px] border border-line bg-surface p-5">
                   <div className="mb-4 flex items-center gap-3">
-                    <span className="mono text-[0.74rem] font-semibold tracking-[0.1em] text-blue-ink">{p.n}</span>
+                    <span className="mono text-[0.74rem] font-semibold tracking-[0.1em] text-accent-ink">{p.n}</span>
                     <h2 className="text-[1.05rem] font-semibold">{p.title}</h2>
                     {p.you && <Badge tone="solid" size="xs">you</Badge>}
                   </div>
@@ -103,7 +103,7 @@ export default function ProofPage() {
           <Reveal delay={0.24}>
             <p className="pt-4 text-ink-2">
               Reproduce it yourself with <code className="mono">scripts/eval-claude.sh</code>.{' '}
-              <Link href="/docs/how-it-works/" className="text-blue hover:underline">How the gates work →</Link>
+              <Link href="/docs/how-it-works/" className="text-accent hover:underline">How the gates work →</Link>
             </p>
           </Reveal>
         </div>

@@ -11,7 +11,7 @@ export function DocArticle({ doc }: { doc: Doc }) {
           prose-headings:font-medium prose-headings:tracking-tight
           prose-h2:mt-12 prose-h2:text-[1.5rem] prose-h3:text-[1.1rem]
           prose-p:text-ink-2 prose-li:text-ink-2
-          prose-a:text-blue prose-a:no-underline hover:prose-a:underline
+          prose-a:text-accent prose-a:no-underline hover:prose-a:underline
           prose-strong:text-ink
           prose-code:rounded prose-code:bg-paper-2 prose-code:px-1.5 prose-code:py-0.5
           prose-code:font-normal prose-code:text-ink prose-code:before:content-none prose-code:after:content-none

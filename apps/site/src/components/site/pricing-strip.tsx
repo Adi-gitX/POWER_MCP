@@ -43,7 +43,7 @@ export function PricingStrip() {
           </ul>
           <p className="mt-5 text-[0.92rem] text-ink-2">
             Refused calls are never billed. Reads and export are free on every plan.{' '}
-            <Link href="/pricing/" className="text-blue hover:underline">See what counts →</Link>
+            <Link href="/pricing/" className="text-accent hover:underline">See what counts →</Link>
           </p>
         </Reveal>
       </div>

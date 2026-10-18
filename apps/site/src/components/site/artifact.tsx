@@ -41,7 +41,7 @@ export function ToolLine({ state = 'idle', tool, status }: { state?: LineState; 
 /** The rule a gate names, or the requirement that satisfied it. */
 export function RuleNote({ tone, id, children }: { tone: 'no' | 'ok'; id: string; children: React.ReactNode }) {
   return (
-    <div className={cn('mt-0.5 rounded-r-md border-l-2 bg-white px-2.5 py-2', tone === 'no' ? 'border-refuse' : 'border-pass')}>
+    <div className={cn('mt-0.5 rounded-r-md border-l-2 bg-surface px-2.5 py-2', tone === 'no' ? 'border-refuse' : 'border-pass')}>
       <b className={cn('mb-0.5 block font-semibold', tone === 'no' ? 'text-refuse' : 'text-pass')}>{id}</b>
       <span className="leading-snug text-ink-2">{children}</span>
     </div>
@@ -51,12 +51,12 @@ export function RuleNote({ tone, id, children }: { tone: 'no' | 'ok'; id: string
 /** A stop that waits for a person. */
 export function AskRow({ title, phase }: { title: string; phase: string }) {
   return (
-    <div className="flex items-center justify-between gap-2.5 rounded-lg border border-line-2 bg-white px-2.5 py-2">
+    <div className="flex items-center justify-between gap-2.5 rounded-lg border border-line-2 bg-surface px-2.5 py-2">
       <span className="grid min-w-0">
         <b className="font-sans text-[0.82rem] font-semibold leading-tight text-ink">{title}</b>
         <span className="text-[0.68rem] text-ink-2">{phase}</span>
       </span>
-      <span className="shrink-0 rounded-full bg-blue px-1.5 py-0.5 font-sans text-[0.62rem] font-bold uppercase tracking-wider text-white">
+      <span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-sans text-[0.62rem] font-bold uppercase tracking-wider text-bright">
         you
       </span>
     </div>

@@ -20,7 +20,7 @@ export function TabsTrigger({ className, ...props }: React.ComponentProps<typeof
     <TabsPrimitive.Trigger
       className={cn(
         'rounded-md px-2 py-1.5 text-[0.7rem] font-semibold text-ink-2 transition-all',
-        'hover:text-ink data-[state=active]:bg-white data-[state=active]:text-ink',
+        'hover:text-ink data-[state=active]:bg-surface data-[state=active]:text-ink',
         'data-[state=active]:shadow-[0_1px_2px_rgba(25,25,29,0.12)]',
         className,
       )}

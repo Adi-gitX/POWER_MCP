@@ -24,12 +24,12 @@ export function SiteNav() {
           className={cn(
             'mt-3 flex h-14 items-center justify-between rounded-full border px-3 pl-4 backdrop-blur-xl transition-colors duration-300',
             scrolled
-              ? 'border-line bg-white/85 shadow-[0_8px_30px_-18px_rgba(25,25,29,0.3)]'
-              : 'border-white/55 bg-white/75 shadow-[0_8px_30px_-22px_rgba(16,40,90,0.45)]',
+              ? 'border-line bg-surface/85 shadow-[0_8px_30px_-18px_rgba(0,0,0,0.55)]'
+              : 'border-brightline/25 bg-surface/60 shadow-[0_8px_30px_-22px_rgba(0,0,0,0.6)]',
           )}
         >
           <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-            <Mark className="size-6 text-blue" />
+            <Mark className="size-6 text-accent" />
             {SITE.name}
           </Link>
 
@@ -38,7 +38,7 @@ export function SiteNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className="hidden rounded-full px-3 py-2 text-[0.92rem] text-ink-2 transition-colors hover:text-ink sm:block"
+                className="hidden rounded-full px-3 py-2 text-[0.92rem] text-ink-2 transition-all duration-200 hover:-translate-y-0.5 hover:text-ink sm:block"
               >
                 {item.label}
               </Link>
@@ -49,7 +49,7 @@ export function SiteNav() {
             >
               Source
             </a>
-            <Button asChild size="sm" className="ml-1 rounded-full">
+            <Button asChild size="sm" variant="primary" className="ml-1 rounded-full">
               <Link href="/docs/getting-started/">Connect</Link>
             </Button>
           </div>

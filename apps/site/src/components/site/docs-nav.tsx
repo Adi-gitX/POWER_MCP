@@ -29,7 +29,7 @@ export function DocsNav() {
                     className={cn(
                       'block border-l-2 py-1.5 pl-3 text-[0.92rem] transition-colors',
                       active
-                        ? 'border-blue font-medium text-blue'
+                        ? 'border-accent font-medium text-accent'
                         : 'border-transparent text-ink-2 hover:border-line-2 hover:text-ink',
                     )}
                   >

@@ -19,13 +19,13 @@ export function ProofStrip() {
             {t.calls.length} calls, {t.refusals.length} refusal, 0 protocol errors. Read from the
             committed transcript at build time, not typed by hand.
           </p>
-          <Link href="/proof/" className="mt-5 inline-block text-blue hover:underline">
+          <Link href="/proof/" className="mt-5 inline-block text-accent hover:underline">
             Every call, unedited →
           </Link>
         </Reveal>
 
         <Reveal delay={0.08} className="lg:col-span-8">
-          <Artifact className="h-auto bg-white">
+          <Artifact className="h-auto bg-surface">
             <div className="flex-1 space-y-2">
               {refused && <ToolLine state="no" tool={refused.tool} status={`refused · ${refused.reason ?? 'gate_not_satisfied'}`} />}
               {refused?.reason && <RuleNote tone="no" id={refused.reason}>The gate named the rule and the next action.</RuleNote>}

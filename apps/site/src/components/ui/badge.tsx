@@ -7,11 +7,11 @@ const badgeVariants = cva(
   {
     variants: {
       tone: {
-        blue: 'border-blue-line bg-blue-wash text-blue-ink',
+        blue: 'border-accent-line bg-accent-wash text-accent-ink',
         pass: 'border-pass/25 bg-pass-wash text-pass',
         refuse: 'border-refuse/25 bg-refuse-wash text-refuse',
         neutral: 'border-line-2 bg-paper-2 text-ink-2',
-        solid: 'border-transparent bg-blue text-white',
+        solid: 'border-transparent bg-accent text-bright',
       },
       size: { xs: 'text-[0.62rem]', sm: 'text-[0.72rem]' },
     },

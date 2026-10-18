@@ -26,21 +26,21 @@ export function Steps() {
           {/* the connector sits behind the cards, so it shows only in the gaps */}
           <div
             aria-hidden
-            className="absolute left-[10%] right-[10%] top-[calc(1.2rem+12px)] hidden h-0.5 rounded bg-gradient-to-r from-blue to-blue/25 opacity-60 lg:block"
+            className="draw-line absolute left-[10%] right-[10%] top-[calc(1.2rem+12px)] hidden h-0.5 rounded bg-gradient-to-r from-accent to-accent/25 opacity-60 lg:block"
           />
           <ol className="relative grid gap-3.5 sm:grid-cols-2 lg:grid-cols-5">
             {STEPS.map((s, i) => (
               <Reveal key={s.n} delay={i * 0.06}>
                 <li
                   className={cn(
-                    'flex h-full flex-col rounded-[14px] border p-[1.2rem]',
-                    s.you ? 'border-blue-line bg-gradient-to-b from-blue-wash to-[#e3ecfd]' : 'border-line bg-white',
+                    'lift flex h-full flex-col rounded-[14px] border p-[1.2rem]',
+                    s.you ? 'border-accent-line bg-gradient-to-b from-accent-wash to-[#e3ecfd]' : 'border-line bg-surface',
                   )}
                 >
                   <div className="flex min-h-6 items-center justify-between gap-2">
-                    <span className="mono text-[0.74rem] font-semibold leading-6 tracking-[0.1em] text-blue-ink">{s.n}</span>
+                    <span className="mono text-[0.74rem] font-semibold leading-6 tracking-[0.1em] text-accent-ink">{s.n}</span>
                     {s.you && (
-                      <span className="rounded-full border border-blue-line bg-white px-2 py-1 text-[0.62rem] font-bold uppercase leading-none tracking-[0.1em] text-blue-ink">
+                      <span className="rounded-full border border-accent-line bg-surface px-2 py-1 text-[0.62rem] font-bold uppercase leading-none tracking-[0.1em] text-accent-ink">
                         you
                       </span>
                     )}

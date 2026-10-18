@@ -23,7 +23,7 @@ export function ScrollFillText({ text, last }: { text: string; last: string }) {
     return (
       <div className="text-center">
         <p className="serif mx-auto max-w-[26ch] text-serif-lg font-medium tracking-tight">{text}</p>
-        <p className="serif mt-[0.38em] text-serif-lg font-medium italic tracking-tight text-blue">{last}</p>
+        <p className="serif mt-[0.38em] text-serif-lg font-medium italic tracking-tight text-accent">{last}</p>
       </div>
     );
   }
@@ -39,7 +39,7 @@ export function ScrollFillText({ text, last }: { text: string; last: string }) {
       </p>
       <motion.p
         style={{ opacity: endOpacity, y: endY }}
-        className="serif mt-[0.38em] text-serif-lg font-medium italic tracking-tight text-blue"
+        className="serif mt-[0.38em] text-serif-lg font-medium italic tracking-tight text-accent"
       >
         {last}
       </motion.p>
@@ -50,6 +50,6 @@ export function ScrollFillText({ text, last }: { text: string; last: string }) {
 function Word({
   children, progress, range,
 }: { children: string; progress: MotionValue<number>; range: [number, number] }) {
-  const color = useTransform(progress, range, ['#c9d0dd', '#191a1d']);
+  const color = useTransform(progress, range, ['#4a4a42', '#f0f1e9']);
   return <motion.span style={{ color }}>{children}</motion.span>;
 }

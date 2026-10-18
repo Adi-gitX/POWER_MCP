@@ -29,7 +29,7 @@ export function Features() {
         <Reveal className="mx-auto max-w-2xl text-center">
           <span className="eyebrow">What it does</span>
           <h2 className="serif mt-5 text-h2">
-            Where the model meets a <em className="text-blue">no</em>.
+            Where the model meets a <em className="text-accent">no</em>.
           </h2>
           <p className="mt-4 text-[1.18rem] leading-relaxed text-ink-2">
             Three pieces of code that don’t care how confident the model sounds.
@@ -39,7 +39,7 @@ export function Features() {
         <div className="mt-12 grid gap-4 md:grid-cols-3">
           {/* 1 — the refusal, switchable */}
           <Reveal delay={0}>
-            <article className="flex h-full flex-col rounded-[14px] border border-line bg-white p-[1.15rem] shadow-[0_1px_2px_rgba(25,25,29,0.04)]">
+            <article className="flex h-full flex-col rounded-[14px] border border-line bg-surface p-[1.15rem] shadow-[0_1px_2px_rgba(25,25,29,0.04)]">
               <Tag>{CARDS[0].tag}</Tag>
               <Tabs defaultValue="no">
                 <Artifact>
@@ -65,7 +65,7 @@ export function Features() {
 
           {/* 2 — what exists and what does not */}
           <Reveal delay={0.08}>
-            <article className="flex h-full flex-col rounded-[14px] border border-line bg-white p-[1.15rem] shadow-[0_1px_2px_rgba(25,25,29,0.04)]">
+            <article className="flex h-full flex-col rounded-[14px] border border-line bg-surface p-[1.15rem] shadow-[0_1px_2px_rgba(25,25,29,0.04)]">
               <Tag>{CARDS[1].tag}</Tag>
               <Artifact>
                 <div className="flex-1 space-y-1.5">
@@ -82,7 +82,7 @@ export function Features() {
 
           {/* 3 — the two human gates */}
           <Reveal delay={0.16}>
-            <article className="flex h-full flex-col rounded-[14px] border border-line bg-white p-[1.15rem] shadow-[0_1px_2px_rgba(25,25,29,0.04)]">
+            <article className="flex h-full flex-col rounded-[14px] border border-line bg-surface p-[1.15rem] shadow-[0_1px_2px_rgba(25,25,29,0.04)]">
               <Tag>{CARDS[2].tag}</Tag>
               <Artifact>
                 <div className="flex-1 space-y-2">
@@ -101,7 +101,7 @@ export function Features() {
 }
 
 function Tag({ children }: { children: React.ReactNode }) {
-  return <span className="mono mb-3.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-blue-ink">{children}</span>;
+  return <span className="mono mb-3.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-ink">{children}</span>;
 }
 
 function Body({ title, children }: { title: string; children: React.ReactNode }) {

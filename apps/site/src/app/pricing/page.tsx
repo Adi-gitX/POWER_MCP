@@ -65,13 +65,13 @@ export default function PricingPage() {
                 <div
                   className={cn(
                     'flex h-full flex-col rounded-[18px] border p-7',
-                    featured ? 'border-blue bg-blue-wash' : 'border-line bg-white',
+                    featured ? 'border-accent bg-accent-wash' : 'border-line bg-surface',
                   )}
                 >
                   <div className="flex items-center justify-between">
                     <h2 className="text-[1.15rem] font-semibold">{LABEL[k]}</h2>
                     {featured && (
-                      <span className="rounded-full bg-blue px-2.5 py-1 text-[0.62rem] font-bold uppercase tracking-wider text-white">
+                      <span className="rounded-full bg-accent px-2.5 py-1 text-[0.62rem] font-bold uppercase tracking-wider text-bright">
                         Most picked
                       </span>
                     )}
