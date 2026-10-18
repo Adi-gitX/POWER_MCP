@@ -5,7 +5,7 @@
  */
 export const SITE = {
   name: 'Power',
-  tagline: 'The AI can’t mark its own homework.',
+  tagline: 'Ship verified apps from Claude and Cursor without the guesswork.',
   tag: 'Ship it checked.',
   url: process.env.SITE_URL ?? 'https://power.build',
   mcp: 'https://mcp.power.build/mcp',
