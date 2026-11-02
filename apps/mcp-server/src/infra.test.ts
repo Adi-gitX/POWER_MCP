@@ -251,6 +251,18 @@ describe.each(BACKENDS)('control plane with RLS on $name', ({ open }) => {
     expect(await cp.planOf(owner)).toBe('pro');
   });
 
+  it('renames a project without moving its slug, and only for its owner', async () => {
+    const alice = cp.storeFor(owner);
+    const renamed = await alice.renameProject(pid, 'B');
+    expect(renamed.name).toBe('B');
+    expect(renamed.slug).toBe(`a-${tag}`);
+    expect((await alice.getProject(pid))?.name).toBe('B');
+
+    await cp.ensureUser(intruder);
+    // Row-level security turns someone else's project into no project at all.
+    await expect(cp.storeFor(intruder).renameProject(pid, 'Taken')).rejects.toThrow(/not found/);
+  });
+
   it('row-level security: another tenant sees nothing, even by id', async () => {
     await cp.ensureUser(intruder);
     const mallory = cp.storeFor(intruder);
@@ -308,6 +320,34 @@ describe.each(BACKENDS)('control plane with RLS on $name', ({ open }) => {
     expect((await alice.getArtifacts(pid))['SPEC.md']).toBe('# spec');
     expect((await alice.getGateErrors(pid)).spec?.[0]?.rule).toBe('r');
     expect((await alice.getApprovals(pid)).spec_approved_at).toBeTruthy();
+  });
+
+  it('a rollback makes the promoted release the live pointer', async () => {
+    // Rollback promotes a release that already exists rather than creating a
+    // new one. Writing the old row back unchanged left latestDeployment
+    // pointing at the version that was rolled away from, so publish status
+    // named the wrong live release and a second rollback could not happen.
+    const alice = cp.storeFor(owner);
+    const base = {
+      project_id: pid,
+      provider: 'local',
+      target: 'production' as const,
+      commit: null,
+      ready_state: 'READY',
+      deploy_project_name: `a-${tag}`,
+      created_at: new Date().toISOString(),
+    };
+    const older = { ...base, id: `dpl_v1_${tag}`, version: 'v1', url: 'v1.example' };
+    const newer = { ...base, id: `dpl_v2_${tag}`, version: 'v2', url: 'v2.example' };
+
+    await alice.putDeployment(older);
+    await alice.putDeployment(newer);
+    expect((await alice.latestDeployment(pid, 'production'))?.version).toBe('v2');
+
+    await alice.putDeployment({ ...older, promoted_at: new Date(Date.now() + 1_000).toISOString() });
+    const live = await alice.latestDeployment(pid, 'production');
+    expect(live?.version).toBe('v1');
+    expect(live?.id).toBe(older.id);
   });
 });
 

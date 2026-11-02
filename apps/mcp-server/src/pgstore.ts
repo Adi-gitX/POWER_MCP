@@ -106,6 +106,9 @@ create table if not exists deployments (
   created_at timestamptz not null default now()
 );
 create index if not exists deployments_project on deployments (project_id, target, created_at desc);
+-- A rollback promotes an existing release; it does not create a new one, so
+-- the live pointer has to be a separate timestamp rather than created_at.
+alter table deployments add column if not exists promoted_at timestamptz;
 `;
 
 const CHILD_TABLES = ['runs', 'artifacts', 'gate_errors', 'approvals', 'deployments'];
@@ -209,6 +212,25 @@ export class PgStore implements Store {
     });
   }
 
+  async renameProject(id: string, name: string): Promise<Project> {
+    return this.scoped(async (tx) => {
+      // Row-level security scopes the update to this user's project; a rename
+      // of someone else's project matches no row and is reported as missing
+      // rather than forbidden, which is the same answer either way.
+      const { rows } = await tx.query<Project & { created_at: Date | string }>(
+        `update projects set name = $2 where id = $1 returning id, name, slug, created_at`,
+        [id, name],
+      );
+      const row = rows[0];
+      if (!row) throw new NotFound(`project ${id}`);
+      await tx.query(`insert into audit_log (user_id, project_id, actor, action) values ($1,$2,'web','rename_project')`, [
+        this.userId,
+        id,
+      ]);
+      return { ...row, created_at: new Date(row.created_at).toISOString() };
+    });
+  }
+
   async getRun(projectId: string): Promise<RunState> {
     return this.scoped(async (tx) => {
       const { rows } = await tx.query<{ state: unknown }>(`select state from runs where project_id = $1`, [projectId]);
@@ -297,10 +319,10 @@ export class PgStore implements Store {
   async putDeployment(d: DeploymentRecord): Promise<void> {
     await this.scoped(async (tx) => {
       await tx.query(
-        `insert into deployments (id, project_id, user_id, provider, target, version, commit, url, ready_state, deploy_project_name)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         on conflict (id) do update set ready_state = excluded.ready_state, url = excluded.url`,
-        [d.id, d.project_id, this.userId, d.provider, d.target, d.version, d.commit, d.url, d.ready_state, d.deploy_project_name],
+        `insert into deployments (id, project_id, user_id, provider, target, version, commit, url, ready_state, deploy_project_name, promoted_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         on conflict (id) do update set ready_state = excluded.ready_state, url = excluded.url, promoted_at = excluded.promoted_at`,
+        [d.id, d.project_id, this.userId, d.provider, d.target, d.version, d.commit, d.url, d.ready_state, d.deploy_project_name, d.promoted_at ?? null],
       );
     });
   }
@@ -312,8 +334,9 @@ export class PgStore implements Store {
   async listDeployments(projectId: string, target: 'production' | 'preview', limit = 10): Promise<DeploymentRecord[]> {
     return this.scoped(async (tx) => {
       const { rows } = await tx.query<DeploymentRecord & { created_at: string | Date }>(
-        `select id, project_id, provider, target, version, commit, url, ready_state, deploy_project_name, created_at
-           from deployments where project_id = $1 and target = $2 order by created_at desc limit $3`,
+        `select id, project_id, provider, target, version, commit, url, ready_state, deploy_project_name, created_at, promoted_at
+           from deployments where project_id = $1 and target = $2
+           order by coalesce(promoted_at, created_at) desc limit $3`,
         [projectId, target, limit],
       );
       return rows.map((r) => ({ ...r, created_at: new Date(r.created_at).toISOString() }));

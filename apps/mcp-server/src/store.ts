@@ -47,6 +47,14 @@ export interface Store {
   createProject(project: Project, state: RunState): Promise<void>;
   getProject(id: string): Promise<Project | null>;
   listProjects(): Promise<Project[]>;
+  /**
+   * Change the display name only.
+   *
+   * The slug is deliberately immutable: publish, unpublish and migration
+   * confirmations ask the user to type it, and a confirmation they typed for a
+   * project under one name must not silently authorise a project under another.
+   */
+  renameProject(id: string, name: string): Promise<Project>;
 
   getRun(projectId: string): Promise<RunState>;
   putRun(projectId: string, state: RunState): Promise<void>;
@@ -79,6 +87,8 @@ export interface DeploymentRecord {
   ready_state: string;
   deploy_project_name: string;
   created_at: string;
+  /** Set when a release is promoted by a rollback; the live pointer. */
+  promoted_at?: string | null;
 }
 
 export class NotFound extends Error {
@@ -116,6 +126,14 @@ export class MemoryStore implements Store {
 
   async listProjects(): Promise<Project[]> {
     return [...this.projects.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  async renameProject(id: string, name: string): Promise<Project> {
+    const project = this.projects.get(id);
+    if (!project) throw new NotFound(`project ${id}`);
+    const renamed = { ...project, name };
+    this.projects.set(id, renamed);
+    return renamed;
   }
 
   async getRun(projectId: string): Promise<RunState> {

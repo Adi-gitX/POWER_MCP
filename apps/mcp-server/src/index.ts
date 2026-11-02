@@ -10,14 +10,16 @@
  * None of the approval endpoints is a tool. They are applied here, from a
  * browser, and nowhere else. The conversation can ask; it cannot answer.
  */
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { apply, canPublish, phaseLabel } from '@power/runstate';
+import { apply, canPublish } from '@power/runstate';
 import { Redis } from 'ioredis';
 import { authenticatorFromEnv, type Principal } from './auth.js';
 import { PgliteDriver } from './db.js';
+import { PostgresDriver } from './postgres-driver.js';
 import { LocalDeployer } from './deploy-local.js';
 import { VercelDeployer } from './deploy-vercel.js';
 import { Jobs } from './jobs.js';
@@ -30,6 +32,24 @@ import { createOAuthApp, isOAuthPath } from './oauth/routes.js';
 import { openPgControlPlane, openPgliteControlPlane } from './pgstore.js';
 import { LocalSandbox } from './sandbox.js';
 import { csrfField, mintCsrf, sameOrigin, verifyCsrf, CSRF_FIELD } from './csrf.js';
+import {
+  connectPage,
+  DASHBOARD_CSS,
+  FAVICON,
+  projectPage as renderProject,
+  projectsPage,
+  renderMessagePage,
+  renderSecretPage,
+  renderSecretSaved,
+  settingsPage,
+  specPage,
+  validateProjectName,
+  type MigrationView,
+  type PageContext,
+  type ProjectFilter,
+  type ProjectRow,
+  type ProjectView,
+} from './dashboard.js';
 import { PgSecrets, secretKeyFromEnv } from './secrets-pg.js';
 import { assertRegistryCoverage, createMcpServer, type Deps } from './server.js';
 
@@ -127,7 +147,13 @@ const secrets = new PgSecrets(controlPlane.sql, SECRET_KEY);
 const sandbox = new LocalSandbox(ROOT);
 // A project's own dev server, so it can be seen while it is being built.
 const runtime = new LocalRuntime((id) => join(ROOT, 'projects', id));
-const db = new PgliteDriver(ROOT);
+// The project database. PGlite needs nothing installed; a real Postgres is
+// what a hosted node uses, and the driver interface is the same either way.
+// Chosen explicitly, never by falling back: a project that silently moved
+// engines between boots would lose its data with nothing in the logs.
+const db = process.env.POWER_PROJECT_DATABASE_URL
+  ? new PostgresDriver(process.env.POWER_PROJECT_DATABASE_URL)
+  : new PgliteDriver(ROOT);
 // Explicit, never a fallback: a publish that silently went nowhere real is
 // the failure this whole path exists to remove.
 const deployer =
@@ -136,19 +162,6 @@ const deployer =
 const deps: Deps = { deployer, runtime, storeFor: (u) => controlPlane.storeFor(u), sandbox, db, secrets, jobs: new Jobs(), meter, baseUrl: BASE_URL, previewBaseUrl: PREVIEW_BASE_URL };
 
 // ---------------------------------------------------------------- helpers
-
-function html(res: ServerResponse, status: number, body: string): void {
-  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8' });
-  res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Power</title>
-<style>body{font:16px/1.5 system-ui;max-width:720px;margin:3rem auto;padding:0 1rem;color:#1a1a1a}
-h1{font-size:1.4rem}h2{font-size:1.15rem;margin-top:2rem}code,pre{background:#f4f4f4;padding:.15em .35em;border-radius:4px}pre{padding:1rem;overflow:auto;white-space:pre-wrap}
-button{font:inherit;padding:.5rem 1rem;border-radius:6px;border:1px solid #888;background:#fff;cursor:pointer;margin-right:.5rem}
-button.primary{background:#111;color:#fff;border-color:#111}button.danger{background:#b00020;color:#fff;border-color:#b00020}
-.muted{color:#666}.pill{display:inline-block;padding:.1em .6em;border-radius:999px;background:#eef;font-size:.9em;margin-right:.3em}
-.warn{background:#fff4e5;border-left:4px solid #f0a020;padding:.75rem 1rem;margin:1rem 0}
-form{display:inline}input[type=text],input[type=password]{font:inherit;padding:.4rem .6rem;border:1px solid #aaa;border-radius:6px;width:100%;max-width:420px;box-sizing:border-box}
-ul.plain{list-style:none;padding:0}</style>${body}`);
-}
 
 function text(res: ServerResponse, status: number, body: string, type = 'text/plain'): void {
   res.writeHead(status, { 'content-type': `${type}; charset=utf-8` });
@@ -194,8 +207,6 @@ class PayloadTooLarge extends Error {
   }
 }
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-
 // ---------------------------------------------------------------- MCP
 
 async function handleMcp(req: IncomingMessage, res: ServerResponse, principal: Principal): Promise<void> {
@@ -217,90 +228,119 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, principal: P
 
 // ---------------------------------------------------------------- pages
 
+/** Everything a page needs about the person looking at it. */
+async function pageContext(principal: Principal): Promise<PageContext> {
+  const remaining = await meter.remaining(principal.user_id);
+  return {
+    baseUrl: BASE_URL,
+    user: principal.user_id,
+    plan: remaining.plan,
+    remaining: { day: remaining.day, week: remaining.week },
+  };
+}
+
+function page(res: ServerResponse, status: number, body: string): void {
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(body);
+}
+
+/** A migration artifact written by an older version may not parse; show nothing rather than fail the page. */
+function parseMigration(raw: string | undefined): MigrationView | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as {
+      proposal?: { intent?: string };
+      verdict?: { pass?: boolean; destructive?: boolean; summary?: string[] };
+      promoted_at?: string | null;
+    };
+    if (!parsed.proposal?.intent || !parsed.verdict) return null;
+    return {
+      intent: parsed.proposal.intent,
+      pass: parsed.verdict.pass === true,
+      destructive: parsed.verdict.destructive === true,
+      summary: parsed.verdict.summary ?? [],
+      promoted_at: parsed.promoted_at ?? undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function projectView(principal: Principal, id: string): Promise<ProjectView | null> {
+  return (async () => {
+    const store = controlPlane.storeFor(principal.user_id);
+    const project = await store.getProject(id);
+    if (!project) return null;
+    const [state, approvals, artifacts, live, secretList, deployments] = await Promise.all([
+      store.getRun(id),
+      store.getApprovals(id),
+      store.getArtifacts(id),
+      sandbox.publishStatus(id),
+      secrets.list(id),
+      store.listDeployments(id, 'production', 8),
+    ]);
+    const port = runtime.portFor(id);
+    return {
+      project,
+      state,
+      approvals,
+      publish: canPublish(state),
+      live,
+      deployments,
+      secrets: secretList,
+      migration: parseMigration(artifacts['migration.json']),
+      spec: artifacts['SPEC.md'] ?? null,
+      previewUrl: port ? `/preview/${id}/` : null,
+      // Every form below authorises something an assistant is not allowed to do
+      // for itself, so each one carries proof that it came from a page Power
+      // rendered for this person.
+      csrf: csrfField(mintCsrf(SECRET_KEY, principal.user_id, id)),
+      dbLabel: process.env.POWER_PROJECT_DATABASE_URL ? 'Postgres' : 'PGlite (local)',
+      deployerLabel: deployer.provider === 'vercel' ? 'Vercel' : 'Local previews',
+    };
+  })();
+}
+
 async function projectPage(principal: Principal, id: string, res: ServerResponse): Promise<void> {
+  const view = await projectView(principal, id);
+  if (!view) return page(res, 404, renderMessagePage('No such project', 'This project does not exist, or it belongs to another account.'));
+  page(res, 200, renderProject(view, await pageContext(principal)));
+}
+
+async function specPageFor(principal: Principal, id: string, res: ServerResponse): Promise<void> {
+  const view = await projectView(principal, id);
+  if (!view) return page(res, 404, renderMessagePage('No such project', 'This project does not exist, or it belongs to another account.'));
+  page(res, 200, specPage(view, await pageContext(principal)));
+}
+
+async function projectsHome(principal: Principal, url: URL, res: ServerResponse): Promise<void> {
   const store = controlPlane.storeFor(principal.user_id);
-  const project = await store.getProject(id);
-  if (!project) return html(res, 404, '<h1>No such project</h1>');
-  const state = await store.getRun(id);
-  const approvals = await store.getApprovals(id);
-  const artifacts = await store.getArtifacts(id);
-  const publish = canPublish(state);
-  const live = await sandbox.publishStatus(id);
-  const secretList = await secrets.list(id);
-  const migration = artifacts['migration.json'] ? (JSON.parse(artifacts['migration.json']) as { proposal: { intent: string }; verdict: { pass: boolean; destructive: boolean; summary: string[] }; promoted_at?: string }) : null;
-
-  const gates = Object.entries(state.gates).map(([k, v]) => `<span class="pill">${k}: ${v}</span>`).join('');
-
-  // Every form below authorises something an assistant is not allowed to do
-  // for itself, so each one carries proof that it came from a page Power
-  // rendered for this person.
-  const csrf = csrfField(mintCsrf(SECRET_KEY, principal.user_id, id));
-
-  let action = '';
-  if (state.phase === 'spec_approval') {
-    action = `<h2>Your assistant wrote a plan and needs your approval</h2>
-<p><a href="/projects/${id}/spec">Read the plan</a> before deciding. Approval is a decision about <em>what</em> gets built; the structure has already been checked by code.</p>
-<form method="post" action="/projects/${id}/approve-spec">${csrf}<button class="primary">Approve the plan</button></form>
-<form method="post" action="/projects/${id}/reject-spec">${csrf}<input type="text" name="reason" placeholder="What should change?" required style="max-width:280px;display:inline-block"> <button>Send it back</button></form>`;
-  } else if (state.phase === 'verify' && publish.allowed) {
-    action = approvals.publish_confirmed_at
-      ? `<h2>Ready to publish</h2><p>You've confirmed. Ask your assistant to call <code>publish_app</code>.</p>`
-      : `<h2>Verified. Publish it?</h2>
-<p>Every P0 requirement was verified by interaction and the checks are green. This will make <strong>${esc(project.name)}</strong> live.</p>
-<form method="post" action="/projects/${id}/confirm-publish">${csrf}<button class="primary">Confirm publish</button></form>`;
-  } else if (state.phase === 'blocked') {
-    action = `<h2>The run stopped and needs you</h2><p>${esc(state.blocked_reason ?? '')}</p><p class="muted">Ask your assistant to restore an earlier checkpoint, or tell it how to proceed. Nothing has been published.</p>`;
-  } else if (state.phase === 'done') {
-    action =
-      `<h2>Live</h2><p>Version <code>${live.version}</code> at <code>${esc(live.live_path ?? '')}</code></p>` +
-      (approvals.unpublish_confirmed_at
-        ? `<p>✓ Confirmed. Ask your assistant to call <code>unpublish_app</code>.</p>`
-        : `<details><summary class="muted">Take it offline</summary>
-<p class="muted">This removes the deployment. The hosting project and any domains stay in your own account, and the code and its history are untouched.</p>
-<form method="post" action="/projects/${id}/confirm-unpublish">${csrf}<input type="text" name="confirm" placeholder="Type ${esc(project.slug)} to confirm" autocomplete="off" required style="max-width:280px;display:inline-block"> <button class="danger">Take ${esc(project.name)} offline</button></form></details>`);
-  } else {
-    action = `<p class="muted">Nothing needs you right now. Your assistant is working: <strong>${phaseLabel(state.phase)}</strong>.</p>`;
-  }
-
-  let migrationBlock = '';
-  if (migration && migration.verdict.pass && !migration.promoted_at) {
-    const lines = migration.verdict.summary.map((s) => `<li>${esc(s)}</li>`).join('');
-    migrationBlock = migration.verdict.destructive
-      ? `<h2>A data change needs your confirmation</h2>
-<div class="warn"><strong>${esc(migration.proposal.intent)}</strong><ul>${lines}</ul>
-<p>This change can lose data. It will only reach your live app if you type <code>${esc(project.slug)}</code> below. Your assistant cannot do this for you.</p>
-${approvals.migration_confirmed_at ? '<p>✓ Confirmed. Ask your assistant to call <code>promote_migration</code>.</p>' : `<form method="post" action="/projects/${id}/confirm-migration">${csrf}<input type="text" name="confirm" placeholder="Type ${esc(project.slug)} to confirm" autocomplete="off" required style="max-width:280px;display:inline-block"> <button class="danger">Apply to live app</button></form>`}
-</div>`
-      : `<h2>A data change is ready</h2><p><strong>${esc(migration.proposal.intent)}</strong></p><ul>${lines}</ul><p class="muted">Nothing existing is removed. It reaches the live app when your assistant calls <code>promote_migration</code> during verification.</p>`;
-  }
-
-  html(
-    res,
-    200,
-    `<h1>${esc(project.name)} <span class="muted">· ${phaseLabel(state.phase)}</span></h1>
-<p>${gates} · retries left: fixes ${2 - state.loops.needs_fixes}, plan ${2 - state.loops.spec_revision}</p>
-${action}${migrationBlock}
-<h2 class="muted">Details</h2>
-<p class="muted">Project <code>${id}</code> · ${artifacts['SPEC.md'] ? `<a href="/projects/${id}/spec">SPEC.md</a>` : 'no plan yet'} · secrets: ${secretList.length ? secretList.map((s) => `<code>${esc(s.name)}</code> <span class="muted">(${s.env})</span>`).join(', ') : 'none'} · <a href="/">all projects</a></p>
-<details><summary class="muted">Run history</summary><pre>${esc(JSON.stringify(state.history, null, 2))}</pre></details>`,
+  const projects = await store.listProjects();
+  const rows: ProjectRow[] = await Promise.all(
+    projects.map(async (project) => ({
+      project,
+      state: await store.getRun(project.id),
+      live: await store.latestDeployment(project.id, 'production'),
+    })),
   );
+  // Search is a GET so it survives a reload, a bookmark and a browser with no
+  // JavaScript. The cap is there so a 10 KB query cannot end up in the page.
+  const q = (url.searchParams.get('q') ?? '').slice(0, 200);
+  const raw = url.searchParams.get('state');
+  const filter: ProjectFilter = raw === 'needs-you' || raw === 'live' ? raw : 'all';
+  page(res, 200, projectsPage(rows, await pageContext(principal), { q, filter }));
+}
+
+async function settingsPageFor(principal: Principal, id: string, url: URL, res: ServerResponse): Promise<void> {
+  const view = await projectView(principal, id);
+  if (!view) return page(res, 404, renderMessagePage('No such project', 'This project does not exist, or it belongs to another account.'));
+  page(res, 200, settingsPage(view, await pageContext(principal), { saved: url.searchParams.get('saved') === '1' }));
 }
 
 async function secretPage(token: string, res: ServerResponse, error?: string): Promise<void> {
   const pending = await secrets.pending(token);
-  if (!pending) return html(res, 404, '<h1>This link has expired or was already used</h1><p class="muted">Ask your assistant to request the secret again.</p>');
-  html(
-    res,
-    error ? 400 : 200,
-    `<h1>Add a secret</h1>
-<p>Your assistant needs <code>${esc(pending.name)}</code>${pending.provider ? ` for <strong>${esc(pending.provider)}</strong>` : ''}, for the <strong>${esc(pending.env)}</strong> environment.</p>
-<p class="muted">${esc(pending.why)}</p>
-${error ? `<p class="warn">${esc(error)}</p>` : ''}
-<form method="post" action="/secrets/${esc(token)}" style="display:block">
-<p><input type="password" name="value" placeholder="Paste the value" autocomplete="off" required autofocus></p>
-<p><button class="primary">Save</button></p></form>
-<p class="muted">The value is stored on the server and injected into your app's environment. It is never shown to the assistant; it only learns the name <code>${esc(pending.name)}</code>.</p>`,
-  );
+  if (!pending) return page(res, 404, renderSecretPage(null));
+  page(res, error ? 400 : 200, renderSecretPage(pending, error));
 }
 
 /** Static files from a local deployment. Path traversal is refused, not sanitised. */
@@ -412,6 +452,26 @@ const server = createServer(async (req, res) => {
     if (req.method === 'OPTIONS') return preflight(req, res);
     applyCors(req, res);
 
+    // The stylesheet is public and content-free; everything else below needs a
+    // session. It is revalidated rather than cached, because a stale design is
+    // worse than one extra request, and the version query handles the rest.
+    if (url.pathname === '/assets/dashboard.css') {
+      res.writeHead(200, {
+        'content-type': 'text/css; charset=utf-8',
+        'cache-control': 'no-cache',
+        'content-length': String(Buffer.byteLength(DASHBOARD_CSS)),
+      });
+      return void res.end(DASHBOARD_CSS);
+    }
+    if (url.pathname === '/assets/favicon.svg') {
+      res.writeHead(200, {
+        'content-type': 'image/svg+xml',
+        'cache-control': 'public, max-age=86400',
+        'content-length': String(Buffer.byteLength(FAVICON)),
+      });
+      return void res.end(FAVICON);
+    }
+
     // A health check that answers 200 unconditionally is worse than none: the
     // platform keeps a node in rotation, and every tool call fails, because the
     // one thing that can actually be broken is the database this never touched.
@@ -462,7 +522,7 @@ const server = createServer(async (req, res) => {
         const value = (await readForm(req)).get('value') ?? '';
         if (value.length < 8) return await secretPage(token, res, 'That value is too short to be a credential.');
         const record = await secrets.set(token, value);
-        return html(res, 200, `<h1>Saved</h1><p><code>${esc(record.name)}</code> is set for <strong>${esc(record.env)}</strong> (fingerprint <code>${record.fingerprint}</code>). You can close this tab and tell your assistant to continue.</p>`);
+        return page(res, 200, renderSecretSaved(record));
       }
       return text(res, 405, 'method not allowed');
     }
@@ -481,10 +541,10 @@ const server = createServer(async (req, res) => {
       if (!owned) return text(res, 404, 'no such project');
       const port = runtime.portFor(projectId);
       if (!port) {
-        return html(
+        return page(
           res,
           503,
-          `<h1>Not running</h1><p class="muted">This project's preview is not up. Ask the assistant to call <code>get_preview_url</code>.</p>`,
+          renderMessagePage('Not running', 'This project has no dev server up. Ask the assistant to call get_preview_url.'),
         );
       }
       return proxyTo(req, res, port, (livePreview[2] ?? '/') + url.search);
@@ -492,17 +552,30 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === '/mcp') return await handleMcp(req, res, principal);
 
-    if (url.pathname === '/') {
-      const projects = await controlPlane.storeFor(principal.user_id).listProjects();
-      const q = await meter.remaining(principal.user_id);
-      return html(
-        res,
-        200,
-        `<h1>Power</h1><p class="muted">MCP endpoint: <code>${BASE_URL}/mcp</code> · signed in as <code>${esc(principal.user_id)}</code> (${q.plan}) · ${q.day} build actions left today</p>` +
-          (projects.length
-            ? `<ul class="plain">${projects.map((p) => `<li><a href="/projects/${p.id}">${esc(p.name)}</a></li>`).join('')}</ul>`
-            : '<p>No projects yet. Ask your assistant to create one.</p>'),
-      );
+    if (req.method === 'GET' && url.pathname === '/') return await projectsHome(principal, url, res);
+    if (req.method === 'GET' && url.pathname === '/projects') return redirect(res, '/');
+    if (req.method === 'GET' && url.pathname === '/connect') {
+      return page(res, 200, connectPage(await pageContext(principal)));
+    }
+
+    // The anti-lock-in promise has to be reachable from a browser, not just a
+    // path on the server's disk. `export_project` hands back this URL; the
+    // bundle is built from the project's git history and streamed as a file.
+    const exportMatch = /^\/projects\/([a-z0-9]+)\/export$/.exec(url.pathname);
+    if (req.method === 'GET' && exportMatch) {
+      const projectId = exportMatch[1]!;
+      const owned = await controlPlane.storeFor(principal.user_id).getProject(projectId);
+      if (!owned) return text(res, 404, 'no such project');
+      const bundle = await sandbox.exportBundle(projectId);
+      const size = (await stat(bundle.path)).size;
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-length': String(size),
+        'content-disposition': `attachment; filename="${owned.slug}.bundle"`,
+        'cache-control': 'no-store',
+      });
+      createReadStream(bundle.path).pipe(res);
+      return;
     }
 
     const match = /^\/projects\/([a-z0-9]+)(?:\/([a-z-]+))?$/.exec(url.pathname);
@@ -513,10 +586,8 @@ const server = createServer(async (req, res) => {
     if (!project) return text(res, 404, 'no such project');
 
     if (req.method === 'GET' && !sub) return await projectPage(principal, id, res);
-    if (req.method === 'GET' && sub === 'spec') {
-      const artifacts = await store.getArtifacts(id);
-      return text(res, 200, artifacts['SPEC.md'] ?? 'No plan has been submitted yet.', 'text/markdown');
-    }
+    if (req.method === 'GET' && sub === 'spec') return await specPageFor(principal, id, res);
+    if (req.method === 'GET' && sub === 'settings') return await settingsPageFor(principal, id, url, res);
 
     if (req.method !== 'POST') return text(res, 405, 'method not allowed');
 
@@ -544,6 +615,16 @@ const server = createServer(async (req, res) => {
     const approvals = await store.getApprovals(id);
     const now = new Date().toISOString();
 
+    if (sub === 'rename') {
+      const check = validateProjectName(form.get('name') ?? '');
+      if (!check.ok) {
+        const view = await projectView(principal, id);
+        if (!view) return text(res, 404, 'no such project');
+        return page(res, 400, settingsPage(view, await pageContext(principal), { error: check.error }));
+      }
+      await store.renameProject(id, check.name);
+      return redirect(res, `/projects/${id}/settings?saved=1`);
+    }
     if (sub === 'approve-spec') {
       await store.putRun(id, apply(state, { type: 'spec_approved' }));
       await store.putApprovals(id, { ...approvals, spec_approved_at: now });
@@ -604,6 +685,9 @@ server.listen(PORT, () => {
   console.log(`power  auth:  ${[process.env.POWER_DEV_AUTH === '1' ? 'dev' : '', process.env.POWER_TOKENS ? 'bearer tokens' : '', 'oauth'].filter(Boolean).join(' + ')}`);
   console.log(`power  quota: ${process.env.REDIS_URL ? 'redis' : 'in-memory'}`);
   console.log(`power  prevw: ${PREVIEW_HOST ? PREVIEW_BASE_URL : `${BASE_URL} (same origin)`}`);
+  console.log(
+    `power  appdb: ${process.env.POWER_PROJECT_DATABASE_URL ? 'postgres' : 'pglite over a socket'}`,
+  );
   if (!PREVIEW_HOST && !LOOPBACK_HOSTS.has(new URL(BASE_URL).hostname)) {
     // Not fatal, because refusing to start would be worse for someone who has
     // already deployed. Loud, because the consequence is that an application
