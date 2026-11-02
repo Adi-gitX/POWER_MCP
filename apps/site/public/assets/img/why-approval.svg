@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+  <g fill="none" stroke="#5c5c5c" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M20 285 L180 195 L340 285 L180 375 Z" fill="#171717" opacity=".85"/>
+    <path d="M52 292 L180 221 L308 292 L180 363 Z" fill="#1d1d1d"/>
+    <path d="M180 195 L180 55" stroke-dasharray="3 6" opacity=".5"/>
+    <path d="M46 250 L24 263 M314 250 L336 263" stroke-dasharray="2 6" opacity=".35"/>
+    <path d="M88 268 L180 216 L272 268 L180 320 Z" fill="#202020"/>
+    <path d="M75 305 L180 363 L285 305" opacity=".55"/>
+    <path d="M114 223 L114 160 C114 122 143 96 180 96 C217 96 246 122 246 160 L246 223" stroke-width="6" stroke="#3b3b3b"/>
+    <path d="M114 223 L114 160 C114 122 143 96 180 96 C217 96 246 122 246 160 L246 223" stroke-width="1.2" stroke="#8a8a8a"/>
+    <path d="M108 212 C108 212 134 196 180 196 C226 196 252 212 252 212 L252 294 C252 310 228 322 180 322 C132 322 108 310 108 294 Z" fill="#242424"/>
+    <path d="M108 212 C108 212 134 196 180 196 C226 196 252 212 252 212" stroke="#9a9a9a"/>
+    <path d="M180 238 L180 282 M162 256 L198 256" stroke="#8e8e8e" stroke-width="1.4"/>
+    <path d="M249 74 L314 39 M249 74 L284 112" stroke-dasharray="2 5" opacity=".4"/>
+    <circle cx="180" cy="196" r="118" opacity=".18" stroke-dasharray="2 8"/>
+    <circle cx="180" cy="212" r="86" opacity=".12" stroke-dasharray="1 7"/>
+  </g>
+</svg>

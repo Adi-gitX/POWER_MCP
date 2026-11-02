@@ -11,7 +11,7 @@ export function DocsNav() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Documentation" className="lg:sticky lg:top-24 lg:self-start">
+    <nav aria-label="Documentation" className="docs-nav lg:sticky lg:top-24 lg:self-start">
       {DOC_SECTIONS.map((section) => (
         <div key={section} className="mb-6">
           <h4 className="mono mb-2 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-ink-3">

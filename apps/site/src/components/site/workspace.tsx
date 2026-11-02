@@ -156,9 +156,9 @@ export function Workspace() {
       <div aria-hidden className="absolute inset-0">
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: 'url(/wallpapers/misty-teal.jpg)' }}
+          style={{ backgroundImage: 'url(/assets/img/hero-bg.jpg)' }}
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/30 to-black/60" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/72 via-black/58 to-black/82" />
       </div>
 
       {/* icon rail */}
@@ -190,7 +190,8 @@ export function Workspace() {
         )}
       >
         <div className="flex items-center justify-between px-5 pb-3 pt-5">
-          <Link href="/" className="serif text-[1.35rem] font-semibold tracking-tight text-bright">
+          <Link href="/" className="flex items-center gap-2.5 text-[1.2rem] font-medium tracking-tight text-bright">
+            <img src="/assets/img/power-mark.svg" alt="" width={22} height={23} />
             {SITE.name}
           </Link>
           <span className="rounded-full bg-accent/90 px-2 py-0.5 text-[0.68rem] font-bold text-accent-ink">
@@ -233,7 +234,7 @@ export function Workspace() {
           <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-bright/45">Power</p>
           <div className="mt-2.5 space-y-0.5">
             <SidebarRow icon={BookOpen} label="How gates work" href="/docs/" />
-            <SidebarRow icon={SquareTerminal} label="Connect your AI" href="/docs/quickstart/" />
+            <SidebarRow icon={SquareTerminal} label="Connect your AI" href="/docs/getting-started/" />
             <SidebarRow icon={ArrowUp} label="Upgrade" href="/pricing/" />
           </div>
         </div>
@@ -284,9 +285,13 @@ export function Workspace() {
         {/* center stage */}
         {!active ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-24">
-            <svg viewBox="0 0 96 96" aria-hidden className="mb-8 h-40 w-40 text-bright/[0.07]">
-              <path fill="currentColor" d="M20 12h56v16H40v12h28v16H40v28H20z" />
-            </svg>
+            <img
+              src="/assets/img/power-mark.svg"
+              alt=""
+              width={160}
+              height={167}
+              className="mb-8 h-40 w-auto opacity-[0.09]"
+            />
             <p className="mb-6 max-w-md text-center text-[0.95rem] text-bright/60">
               Describe what to build. The bench plans it, gates each step, and hands you a verification
               receipt — nothing ships unchecked.

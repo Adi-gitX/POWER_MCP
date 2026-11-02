@@ -1,14 +1,19 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { cn } from '@/lib/utils';
-import { NAV, SITE } from '@/lib/site';
-import { Button } from '@/components/ui/button';
-import { Mark } from './mark';
+import { usePathname } from 'next/navigation';
+
+const NAV = [
+  { href: '/#product', label: 'Product' },
+  { href: '/proof/', label: 'Proof' },
+  { href: '/pricing/', label: 'Pricing' },
+  { href: '/docs/', label: 'Docs' },
+] as const;
 
 export function SiteNav() {
+  const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -17,44 +22,82 @@ export function SiteNav() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  return (
-    <header className="sticky top-0 z-40">
-      <div className="wrap">
-        <nav
-          className={cn(
-            'mt-3 flex h-14 items-center justify-between rounded-full border px-3 pl-4 backdrop-blur-xl transition-colors duration-300',
-            scrolled
-              ? 'border-line bg-surface/85 shadow-[0_8px_30px_-18px_rgba(0,0,0,0.55)]'
-              : 'border-brightline/25 bg-surface/60 shadow-[0_8px_30px_-22px_rgba(0,0,0,0.6)]',
-          )}
-        >
-          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-            <Mark className="size-6 text-accent" />
-            {SITE.name}
-          </Link>
+  useEffect(() => {
+    document.body.classList.toggle('menu-open', open);
+    return () => document.body.classList.remove('menu-open');
+  }, [open]);
 
-          <div className="flex items-center gap-1">
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  if (pathname.startsWith('/app')) return null;
+
+  const isActive = (href: string) => {
+    if (href === '/#product') return pathname === '/';
+    const base = href.replace(/\/$/, '');
+    return pathname === href || pathname.startsWith(`${base}/`);
+  };
+
+  return (
+    <>
+      <header className={`site-header${scrolled ? ' is-scrolled' : ''}`} id="siteHeader">
+        <div className="header-inner">
+          <a className="brand" href="/" aria-label="Power home">
+            <img
+              className="brand-mark"
+              src="/assets/img/power-mark.svg"
+              alt=""
+              width={27}
+              height={28}
+            />
+            <span>Power</span>
+          </a>
+
+          <nav className="primary-nav" aria-label="Primary">
             {NAV.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="hidden rounded-full px-3 py-2 text-[0.92rem] text-ink-2 transition-all duration-200 hover:-translate-y-0.5 hover:text-ink sm:block"
-              >
+              <a key={item.href} href={item.href} aria-current={isActive(item.href) ? 'page' : undefined}>
                 {item.label}
-              </Link>
+              </a>
             ))}
-            <a
-              href={SITE.github}
-              className="hidden rounded-full px-3 py-2 text-[0.92rem] text-ink-2 transition-colors hover:text-ink md:block"
-            >
-              Source
+          </nav>
+
+          <div className="header-right">
+            <a className="btn btn-glass btn-sm" href="/docs/getting-started/">
+              Get started
             </a>
-            <Button asChild size="sm" variant="primary" className="ml-1 rounded-full">
-              <Link href="/docs/getting-started/">Connect</Link>
-            </Button>
+            <button
+              className="menu-toggle"
+              type="button"
+              aria-label={open ? 'Close menu' : 'Open menu'}
+              aria-expanded={open}
+              aria-controls="mobileMenu"
+              onClick={() => setOpen((value) => !value)}
+            >
+              <svg className="icon">
+                <use href={open ? '#i-close' : '#i-menu'} />
+              </svg>
+            </button>
           </div>
+        </div>
+      </header>
+
+      <div className={`mobile-menu${open ? ' is-open' : ''}`} id="mobileMenu" aria-hidden={!open}>
+        <nav aria-label="Mobile">
+          {NAV.map((item) => (
+            <a key={item.href} href={item.href} onClick={() => setOpen(false)}>
+              {item.label}
+            </a>
+          ))}
+          <a href="/docs/getting-started/" onClick={() => setOpen(false)}>
+            Get started
+          </a>
         </nav>
       </div>
-    </header>
+    </>
   );
 }

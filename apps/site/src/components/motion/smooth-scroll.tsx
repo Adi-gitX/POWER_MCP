@@ -9,6 +9,8 @@ export function SmoothScroll() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     const lenis = new Lenis({ lerp: 0.1, wheelMultiplier: 1 });
+    // The landing-page script and same-page anchors use this for consistent motion.
+    (window as Window & { __lenis?: Lenis }).__lenis = lenis;
     let frame = 0;
     const raf = (time: number) => {
       lenis.raf(time);
@@ -19,6 +21,7 @@ export function SmoothScroll() {
     return () => {
       cancelAnimationFrame(frame);
       lenis.destroy();
+      delete (window as Window & { __lenis?: Lenis }).__lenis;
     };
   }, []);
 

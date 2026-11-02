@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     'What Power collects, where it is stored, who else can see it, how long it is kept, and how to take everything with you. Power runs no inference, so your prompts are never sent to a model by us.',
 };
 
-const LAST_UPDATED = '5 October 2026';
+const LAST_UPDATED = '2 November 2026';
 
 const SECTIONS: [string, string][] = [
   ['collect', 'What we collect'],
@@ -34,6 +34,7 @@ const SECTIONS: [string, string][] = [
   ['use', 'How we use it'],
   ['storage', 'Where it is stored'],
   ['sharing', 'Who else can see it'],
+  ['cookies', 'Cookies'],
   ['retention', 'How long we keep it'],
   ['export', 'Taking your data with you'],
   ['security', 'Security'],
@@ -88,7 +89,7 @@ const COLLECTED: [string, string, string][] = [
 export default function PrivacyPage() {
   return (
     <>
-      <section className="pb-8 pt-16">
+      <section className="pb-8 pt-[132px]">
         <div className="wrap max-w-3xl">
           <span className="eyebrow">Privacy</span>
           <h1 className="serif mt-6 text-[clamp(2.4rem,5.4vw,4rem)] leading-[1.02] tracking-tight">
@@ -273,17 +274,29 @@ export default function PrivacyPage() {
                   client&rsquo;s own privacy policy, not ours.
                 </>,
                 <>
-                  <strong>Google Fonts, on this marketing site only.</strong> The typefaces on the
-                  pages you are reading load from Google&rsquo;s font CDN, which sees the request.
-                  The MCP server and the project pages are not involved.
-                </>,
-                <>
                   <strong>When the law requires it.</strong> If we are compelled to produce data, we
                   will produce only what is actually demanded, and we will tell you unless we are
                   forbidden from doing so.
                 </>,
               ]}
             />
+          </Section>
+
+          <Section id="cookies" title="Cookies">
+            <P>
+              Power uses one essential cookie to keep you signed in. It holds a session identifier
+              and nothing else, it is not readable by scripts, and signing out deletes it.
+            </P>
+            <P>
+              The marketing site sets no tracking cookies. There is no advertising pixel, no
+              cross-site identifier and no third-party analytics script. Because the typefaces are
+              served from this site rather than a font CDN, reading these pages does not send a
+              request to anyone else.
+            </P>
+            <P>
+              Your browser may keep local storage for interface preferences, such as a dismissed
+              notice. That data stays in your browser and is never sent to us.
+            </P>
           </Section>
 
           <Section id="retention" title="How long we keep it">

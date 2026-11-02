@@ -1,28 +1,75 @@
-import Link from 'next/link';
-import { LEGAL, NAV, SITE } from '@/lib/site';
-import { Mark } from './mark';
+'use client';
+
+import { usePathname } from 'next/navigation';
+import { SITE } from '@/lib/site';
+
+const COLUMNS = [
+  {
+    title: 'Product',
+    links: [
+      { href: '/', label: 'Homepage' },
+      { href: '/pricing/', label: 'Pricing' },
+      { href: '/proof/', label: 'Proof' },
+      { href: '/updates/', label: 'Updates' },
+    ],
+  },
+  {
+    title: 'Explore',
+    links: [
+      { href: '/docs/getting-started/', label: 'Get started' },
+      { href: '/docs/', label: 'Docs' },
+      { href: '/blog/', label: 'Blog' },
+      { href: '/app/', label: 'Workspace' },
+      { href: SITE.github, label: 'GitHub' },
+    ],
+  },
+  {
+    title: 'Legal',
+    links: [
+      { href: '/terms/', label: 'Terms of use' },
+      { href: '/privacy/', label: 'Privacy policy' },
+      { href: '/privacy/#cookies', label: 'Cookie policy' },
+    ],
+  },
+] as const;
 
 export function SiteFooter() {
+  const pathname = usePathname();
+  if (pathname.startsWith('/app')) return null;
+
   return (
-    <footer className="border-t border-line bg-paper-2">
-      <div className="wrap flex flex-col gap-6 py-10 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-2.5">
-          <Mark className="size-5 text-accent" />
-          <span className="font-semibold">{SITE.name}</span>
-          <span className="text-[0.92rem] text-ink-2">{SITE.tagline}</span>
+    <footer className="site-footer">
+      <div className="shell footer-inner">
+        <div className="footer-brand">
+          <a className="brand" href="/" aria-label="Power home">
+            <img
+              className="brand-mark"
+              src="/assets/img/power-mark.svg"
+              alt=""
+              width={27}
+              height={28}
+            />
+            <span>Power</span>
+          </a>
+          <p className="footer-note">One connection for your tools, skills and context.</p>
         </div>
-        <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[0.92rem] text-ink-2">
-          {NAV.map((i) => (
-            <Link key={i.href} href={i.href} className="transition-colors hover:text-ink">{i.label}</Link>
+
+        <div className="footer-cols">
+          {COLUMNS.map((column) => (
+            <div className="footer-col" key={column.title}>
+              <h4>{column.title}</h4>
+              {column.links.map((link) => (
+                <a key={link.href} href={link.href}>
+                  {link.label}
+                </a>
+              ))}
+            </div>
           ))}
-          <a href={SITE.github} className="transition-colors hover:text-ink">Source</a>
-          {LEGAL.map((i) => (
-            <Link key={i.href} href={i.href} className="transition-colors hover:text-ink">{i.label}</Link>
-          ))}
-        </nav>
-      </div>
-      <div className="wrap border-t border-line py-5 text-[0.82rem] text-ink-3">
-        © {new Date().getFullYear()} {SITE.name}. Your code and your data stay exportable, always.
+        </div>
+
+        <div className="footer-bottom">
+          <p>© {new Date().getFullYear()} Power. All rights reserved.</p>
+        </div>
       </div>
     </footer>
   );

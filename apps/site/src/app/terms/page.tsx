@@ -28,7 +28,7 @@ const LAST_UPDATED = '5 October 2026';
 export default function TermsPage() {
   return (
     <>
-      <section className="pb-8 pt-16">
+      <section className="pb-8 pt-[132px]">
         <div className="wrap max-w-3xl">
           <span className="eyebrow">Terms of service</span>
           <h1 className="serif mt-6 text-[clamp(2.4rem,5.4vw,4rem)] leading-[1.02] tracking-tight">

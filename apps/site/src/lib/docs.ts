@@ -13,12 +13,12 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 const phases = (t: (typeof TOOLS)[number]) => (t.phases === '*' ? 'any' : t.phases.join(', '));
 
-const toolTable = `<table>
+const toolTable = `<div class="tablewrap"><table>
 <thead><tr><th>Tool</th><th>Cost</th><th>Legal in</th><th>What it does</th></tr></thead>
 <tbody>${TOOLS.map(
   (t) =>
     `<tr><td><code>${t.name}</code>${t.live_capable ? ' <em>live</em>' : ''}${t.async ? ' <em>async</em>' : ''}</td><td>${t.metered ? '1 action' : 'free'}</td><td><code>${phases(t)}</code></td><td>${esc(t.summary)}</td></tr>`,
-).join('')}</tbody></table>`;
+).join('')}</tbody></table></div>`;
 
 export const DOCS: Doc[] = [
   {

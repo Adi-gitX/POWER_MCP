@@ -1,0 +1,880 @@
+
+
+  <!-- HERO -->
+  <section class="hero" id="hero">
+    <div class="hero-bg" aria-hidden="true"><img src="/assets/img/hero-bg.jpg" alt=""></div>
+    <div class="hero-shade" aria-hidden="true"></div>
+    <div class="hero-inner shell">
+      <a class="hero-badge" href="/proof/" data-hero-reveal style="--d:0ms">
+        <span>New: production approval gate</span>
+        <span class="hero-badge-arrow"><svg class="icon"><use href="#i-arrow-right"/></svg></span>
+      </a>
+      <h1 class="hero-title" data-hero-reveal style="--d:90ms"><strong>Give your AI everything<br> it needs to ship</strong></h1>
+      <p class="hero-sub" data-hero-reveal style="--d:180ms">One connection for your tools, accounts, <br>skills, workflows and project knowledge.</p>
+      <div class="hero-actions" data-hero-reveal style="--d:270ms">
+        <a class="btn btn-light btn-lg" href="/docs/getting-started/">Start building</a>
+      </div>
+    </div>
+
+    <div class="hero-stage" aria-hidden="false">
+      <div class="chat-card hero-chat" id="heroChat">
+        <div class="chat-head">
+          <img class="chat-logo" src="/assets/img/power-mark.svg" alt="Power" width="32" height="33">
+          <button class="chat-menu" type="button" tabindex="-1" aria-label="Workspace menu"><svg class="icon"><use href="#i-menu"/></svg></button>
+        </div>
+        <div class="chat-thread">
+          <div class="chat-line chat-line-right"><span class="bubble">Add authentication to the app.</span></div>
+          <p class="chat-note">Loading what I already know about this project.</p>
+          <div class="tool-row"><span>get_project_context</span><span class="tool-state ok">Contract loaded · 0.4s</span></div>
+          <div class="tool-row"><span>search_skills(“authentication”)</span><span class="tool-state ok">2 skills found</span></div>
+          <div class="tool-row"><span>activate_skill(auth-supabase)</span><span class="tool-state ok">Activated</span></div>
+          <p class="chat-copy">Your project uses Supabase and team accounts. Two decisions remain: how people sign in, and whether people can join multiple teams.</p>
+          <div class="tool-row"><span>request_approval(deploy: production)</span><span class="tool-state warn">Needs you</span></div>
+          <div class="chat-composer">
+            <span>Describe what you want to ship. Type @ for tools and / for pipelines.</span>
+            <div class="composer-row">
+              <div class="composer-tools">
+                <span><svg class="icon"><use href="#i-paperclip"/></svg></span>
+                <span><svg class="icon"><use href="#i-sliders"/></svg></span>
+                <span><svg class="icon"><use href="#i-command"/></svg></span>
+              </div>
+              <div class="composer-send">
+                <span class="composer-mic"><svg class="icon"><use href="#i-mic"/></svg></span>
+                <span class="composer-go"><svg class="icon"><use href="#i-arrow-up"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hills hills-back" aria-hidden="true">
+        <img class="hill hill-a" data-lag="0.34" src="/assets/img/hills-a.webp" alt="">
+        <img class="hill hill-b" data-lag="0.19" src="/assets/img/hills-b.webp" alt="">
+      </div>
+      <div class="hills hills-front" aria-hidden="true">
+        <img class="hill hill-c" data-lag="0.1" src="/assets/img/hills-c.webp" alt="">
+        <span class="hero-fade" aria-hidden="true"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- OVERVIEW -->
+  <section class="overview" id="overview">
+    <div class="shell overview-inner">
+      <div class="statement-block reveal">
+        <span class="eyebrow"><span class="eyebrow-dot"></span>Overview</span>
+        <div class="statement" id="statement">
+          <p><strong>Power is the MCP server that builds, checks and hosts full-stack apps — with real code execution and automated gates verifying the work before production.</strong></p>
+          <p><strong>Your model does the thinking. Power brings the workbench, the database, the secrets, the deterministic gates and the hosting, so every step is checked by something that cannot be talked out of it.</strong></p>
+          <p><strong>Two decisions stay yours: you approve the plan, and you confirm the publish. Everything else comes back as a receipt.</strong></p>
+        </div>
+      </div>
+    </div>
+    <div class="logo-strip reveal" aria-label="Connects to the services your project already runs on">
+      <p class="logo-caption">Connects to the stack you already use</p>
+      <div class="logo-strip-inner">
+        <span class="logo-item"><img src="/assets/img/brands/github.svg" alt=""><span>GitHub</span></span>
+        <span class="logo-item"><img src="/assets/img/brands/vercel.svg" alt=""><span>Vercel</span></span>
+        <span class="logo-item"><img src="/assets/img/brands/stripe.svg" alt=""><span>Stripe</span></span>
+        <span class="logo-item"><img src="/assets/img/brands/figma.svg" alt=""><span>Figma</span></span>
+        <span class="logo-item"><img src="/assets/img/brands/notion.svg" alt=""><span>Notion</span></span>
+        <span class="logo-item"><img src="/assets/img/brands/slack.svg" alt=""><span>Slack</span></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="how section" id="product">
+    <div class="shell">
+      <div class="sec-head">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>How it works</span>
+          <h2 class="sec-title reveal">One connection to<br><span class="dim">ship your whole stack</span></h2>
+        </div>
+        <p class="sec-copy reveal">Power gives your agent tools, real execution, deterministic checks and approvals through a single MCP connection.</p>
+      </div>
+
+      <div class="demo-tabs reveal" role="tablist" aria-label="How Power works">
+        <button class="demo-tab is-active" role="tab" aria-selected="true" aria-controls="panel-connect" id="tab-connect" type="button" data-demo-tab="connect">Connect</button>
+        <button class="demo-tab" role="tab" aria-selected="false" aria-controls="panel-contract" id="tab-contract" type="button" data-demo-tab="contract">Plan</button>
+        <button class="demo-tab" role="tab" aria-selected="false" aria-controls="panel-execute" id="tab-execute" type="button" data-demo-tab="execute">Build</button>
+        <button class="demo-tab" role="tab" aria-selected="false" aria-controls="panel-approve" id="tab-approve" type="button" data-demo-tab="approve">Approve</button>
+      </div>
+
+      <div class="demo-frame reveal" id="demoFrame">
+        <div class="demo-bg">
+          <img class="demo-bg-img is-active" data-demo-bg="connect" src="/assets/img/tab-connect.jpg" alt="">
+          <img class="demo-bg-img" data-demo-bg="contract" src="/assets/img/tab-contract.jpg" alt="">
+          <img class="demo-bg-img" data-demo-bg="execute" src="/assets/img/tab-execute.jpg" alt="">
+          <img class="demo-bg-img" data-demo-bg="approve" src="/assets/img/tab-approve.jpg" alt="">
+          <div class="demo-bg-veil"></div>
+        </div>
+
+        <div class="demo-slides" id="demoSlides">
+          <!-- CONNECT -->
+          <div class="demo-slide is-active" data-demo-panel="connect" role="tabpanel" aria-labelledby="tab-connect">
+            <div class="demo-shell">
+              <aside class="demo-side">
+                <div class="demo-brand"><img src="/assets/img/power-mark.svg" alt="" width="22" height="23"><span>Power</span></div>
+                <button class="demo-new" type="button" tabindex="-1">New pipeline</button>
+                <div class="demo-nav">
+                  <div class="demo-navitem is-active"><span>Connect your agent</span><small>Sandbox · now</small></div>
+                  <div class="demo-navitem"><span>Project Contract</span><small>v1.0</small></div>
+                  <div class="demo-navitem"><span>Ship SaaS to Production</span><small>15 steps</small></div>
+                  <div class="demo-navitem"><span>Production approval</span><small>Needs you</small></div>
+                </div>
+                <div class="demo-side-foot">Sandbox workspace · sample data</div>
+              </aside>
+              <div class="demo-body">
+                <div class="demo-top">
+                  <h3>Connect</h3>
+                  <span class="pill">MCP endpoint</span>
+                </div>
+                <div class="demo-grid">
+                  <div class="demo-main-col">
+                    <div class="chat-line chat-line-right"><span class="bubble">Connect Claude Code to Power.</span></div>
+                    <p class="demo-copy">Add this server to your client configuration. Your agent will discover capabilities when it needs them.</p>
+                    <pre class="code-block">{
+  "mcpServers": {
+    "power": {
+      "url": "https://YOUR_WORKSPACE_ENDPOINT/mcp"
+    }
+  }
+}</pre>
+                    <div class="demo-composer"><span>Describe what you want to ship...</span></div>
+                  </div>
+                  <div class="demo-aside">
+                    <h4>Capabilities</h4>
+                    <div class="cap-card"><code>search_capabilities</code><small>Find a tool by intent</small></div>
+                    <div class="cap-card"><code>get_project_context</code><small>Load the Project Contract</small></div>
+                    <div class="cap-card"><code>search_skills</code><small>Find executable expertise</small></div>
+                    <div class="cap-card"><code>run_pipeline</code><small>Start a validated pipeline</small></div>
+                    <div class="cap-card"><code>request_approval</code><small>Pause for a human</small></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CONTRACT -->
+          <div class="demo-slide" data-demo-panel="contract" role="tabpanel" aria-labelledby="tab-contract" hidden>
+            <div class="demo-shell">
+              <aside class="demo-side">
+                <div class="demo-brand"><img src="/assets/img/power-mark.svg" alt="" width="22" height="23"><span>Power</span></div>
+                <button class="demo-new" type="button" tabindex="-1">New pipeline</button>
+                <div class="demo-nav">
+                  <div class="demo-navitem"><span>Connect your agent</span><small>Sandbox · now</small></div>
+                  <div class="demo-navitem is-active"><span>Project Contract</span><small>v1.0</small></div>
+                  <div class="demo-navitem"><span>Ship SaaS to Production</span><small>15 steps</small></div>
+                  <div class="demo-navitem"><span>Production approval</span><small>Needs you</small></div>
+                </div>
+                <div class="demo-side-foot">Sandbox workspace · sample data</div>
+              </aside>
+              <div class="demo-body">
+                <div class="demo-top">
+                  <h3>Plan</h3>
+                  <span class="pill">v1.0</span>
+                </div>
+                <div class="demo-grid">
+                  <div class="demo-main-col">
+                    <div class="contract-table">
+                      <div class="contract-row"><span>Project</span><strong>Acme app</strong></div>
+                      <div class="contract-row"><span>Frontend</span><strong>Next.js</strong></div>
+                      <div class="contract-row"><span>Database</span><strong>Supabase</strong></div>
+                      <div class="contract-row"><span>Accounts</span><strong>Teams</strong></div>
+                      <div class="contract-row"><span>Billing</span><strong>Stripe</strong></div>
+                      <div class="contract-row"><span>Deployment</span><strong>Vercel</strong></div>
+                    </div>
+                    <p class="demo-subtitle">Permanent rules</p>
+                    <pre class="code-block rules">Billing belongs to the team.
+Service-role keys stay server-side.
+Production changes require approval.</pre>
+                  </div>
+                  <div class="demo-aside">
+                    <h4>Decisions</h4>
+                    <div class="decision-card"><span>How will people sign in?</span><small>Google + Email</small></div>
+                    <div class="decision-card"><span>Can people join multiple teams?</span><small>Yes, with invitations</small></div>
+                    <div class="decision-card muted">Decisions become permanent project context.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- EXECUTE -->
+          <div class="demo-slide" data-demo-panel="execute" role="tabpanel" aria-labelledby="tab-execute" hidden>
+            <div class="demo-shell">
+              <aside class="demo-side">
+                <div class="demo-brand"><img src="/assets/img/power-mark.svg" alt="" width="22" height="23"><span>Power</span></div>
+                <button class="demo-new" type="button" tabindex="-1">New pipeline</button>
+                <div class="demo-nav">
+                  <div class="demo-navitem"><span>Connect your agent</span><small>Sandbox · now</small></div>
+                  <div class="demo-navitem"><span>Project Contract</span><small>v1.0</small></div>
+                  <div class="demo-navitem is-active"><span>Ship SaaS to Production</span><small>15 steps</small></div>
+                  <div class="demo-navitem"><span>Production approval</span><small>Needs you</small></div>
+                </div>
+                <div class="demo-side-foot">Sandbox workspace · sample data</div>
+              </aside>
+              <div class="demo-body">
+                <div class="demo-top">
+                  <h3>Build</h3>
+                  <span class="pill">ship-to-production</span>
+                </div>
+                <div class="demo-grid">
+                  <div class="demo-main-col">
+                    <div class="chat-line chat-line-right"><span class="bubble">Ship this SaaS.</span></div>
+                    <div class="step-list">
+                      <div class="step"><span class="step-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Project Contract loaded</span><small>0.4s</small></div>
+                      <div class="step"><span class="step-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Requirements resolved</span><small>1.2s</small></div>
+                      <div class="step"><span class="step-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Tests &amp; security validated</span><small>53s</small></div>
+                      <div class="step"><span class="step-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Staging deployed</span><small>9.1s</small></div>
+                      <div class="step"><span class="step-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Browser QA complete</span><small>18s</small></div>
+                      <div class="step is-warn"><span class="step-check"><svg class="icon"><use href="#i-check"/></svg></span><span>Production approval</span><small>Needs you</small></div>
+                    </div>
+                    <div class="demo-composer"><span>Describe what you want to ship...</span></div>
+                  </div>
+                  <div class="demo-aside">
+                    <h4>Tool calls</h4>
+                    <div class="cap-card"><code>run_pipeline</code><small>ship-to-production</small></div>
+                    <div class="cap-card"><code>activate_skill</code><small>security-auditor</small></div>
+                    <div class="cap-card"><code>activate_skill</code><small>qa-engineer</small></div>
+                    <div class="cap-card"><code>request_approval</code><small>deploy: production</small></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- APPROVE -->
+          <div class="demo-slide" data-demo-panel="approve" role="tabpanel" aria-labelledby="tab-approve" hidden>
+            <div class="demo-shell">
+              <aside class="demo-side">
+                <div class="demo-brand"><img src="/assets/img/power-mark.svg" alt="" width="22" height="23"><span>Power</span></div>
+                <button class="demo-new" type="button" tabindex="-1">New pipeline</button>
+                <div class="demo-nav">
+                  <div class="demo-navitem"><span>Connect your agent</span><small>Sandbox · now</small></div>
+                  <div class="demo-navitem"><span>Project Contract</span><small>v1.0</small></div>
+                  <div class="demo-navitem"><span>Ship SaaS to Production</span><small>15 steps</small></div>
+                  <div class="demo-navitem is-active"><span>Production approval</span><small>Needs you</small></div>
+                </div>
+                <div class="demo-side-foot">Sandbox workspace · sample data</div>
+              </aside>
+              <div class="demo-body">
+                <div class="demo-top">
+                  <h3>Approve</h3>
+                  <span class="pill">Production</span>
+                </div>
+                <div class="demo-grid">
+                  <div class="demo-main-col">
+                    <div class="chat-line chat-line-right"><span class="bubble">Ship this SaaS.</span></div>
+                    <div class="approval-card">
+                      <div class="approval-head"><span class="status-dot warn"></span><span>Production deployment</span><span class="pill pill-sm">Needs you</span></div>
+                      <div class="approval-rows">
+                        <div><span>Target</span><strong>production</strong></div>
+                        <div><span>Action</span><strong>deploy ship-to-production</strong></div>
+                        <div><span>Risk</span><strong class="warn-text">High · irreversible</strong></div>
+                      </div>
+                      <p>The pipeline has passed validation, security and browser QA. Approving deploys the exact build shown in staging.</p>
+                      <div class="approval-actions"><span class="btn-mini">Cancel</span><span class="btn-mini light">Approve deployment</span></div>
+                    </div>
+                    <div class="demo-composer"><span>Describe what you want to ship...</span></div>
+                  </div>
+                  <div class="demo-aside">
+                    <h4>Evidence</h4>
+                    <div class="cap-card"><code>tests</code><small>142 passed · 0 failed</small></div>
+                    <div class="cap-card"><code>security_audit</code><small>No new findings</small></div>
+                    <div class="cap-card"><code>staging_preview</code><small>ship-to-production.vercel.app</small></div>
+                    <div class="cap-card"><code>diff</code><small>3 files changed</small></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo-controls reveal">
+        <button class="icon-btn" type="button" id="demoPrev" aria-label="Previous step"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+        <p class="demo-caption" id="demoCaption">Add one MCP endpoint to your agent client.</p>
+        <button class="icon-btn" type="button" id="demoNext" aria-label="Next step"><svg class="icon"><use href="#i-arrow-right"/></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY POWER -->
+  <section class="why section" id="why">
+    <div class="shell">
+      <div class="sec-head">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>Why Power</span>
+          <h2 class="sec-title reveal">Everything your AI can<br>use, <span class="dim">ready when it needs it</span></h2>
+        </div>
+        <p class="sec-copy reveal">Power brings tools, expertise and project context into one controlled interface.</p>
+      </div>
+    </div>
+
+    <div class="rail reveal" id="whyRail">
+      <div class="rail-track" id="whyTrack" tabindex="0" aria-label="Reasons to use Power">
+        <article class="why-card">
+          <div class="why-visual"><img src="/assets/img/why-context.svg" alt="Layered cards representing a shared project context" loading="lazy"></div>
+          <div class="why-copy"><h3>Shared context</h3><p>Decisions, rules and boundaries<br>live in one Project Contract.</p></div>
+        </article>
+        <article class="why-card">
+          <div class="why-visual"><img src="/assets/img/why-scoped.svg" alt="A wireframe cube with a flag representing scoped access" loading="lazy"></div>
+          <div class="why-copy"><h3>Scoped access</h3><p>Review permissions and scopes<br>before any service connects.</p></div>
+        </article>
+        <article class="why-card">
+          <div class="why-visual"><img src="/assets/img/why-skills.svg" alt="A wireframe disc with a play symbol representing executable skills" loading="lazy"></div>
+          <div class="why-copy"><h3>Executable skills</h3><p>Procedures, checks and validation<br>your agent follows every time.</p></div>
+        </article>
+        <article class="why-card">
+          <div class="why-visual"><img src="/assets/img/why-approval.svg" alt="A wireframe padlock representing approval gates" loading="lazy"></div>
+          <div class="why-copy"><h3>Approval gates</h3><p>Production changes pause until<br>you approve the exact action.</p></div>
+        </article>
+        <article class="why-card">
+          <div class="why-visual"><img src="/assets/img/why-history.svg" alt="A wireframe stack of run records with a clock" loading="lazy"></div>
+          <div class="why-copy"><h3>Run history</h3><p>Inspect every step, duration<br>and decision after the run.</p></div>
+        </article>
+      </div>
+    </div>
+
+    <div class="shell">
+      <div class="rail-controls reveal">
+        <button class="icon-btn" type="button" id="whyPrev" aria-label="Previous reasons"><svg class="icon"><use href="#i-arrow-left"/></svg></button>
+        <div class="rail-bar"><span id="whyProgress"></span></div>
+        <button class="icon-btn" type="button" id="whyNext" aria-label="More reasons"><svg class="icon"><use href="#i-arrow-right"/></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHAT YOU GET -->
+  <section class="what section" id="what">
+    <div class="shell">
+      <div class="sec-head">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>What you get</span>
+          <h2 class="sec-title reveal">Give your agent<br>context, <span class="dim">not guesses</span></h2>
+        </div>
+        <p class="sec-copy reveal">Power loads the project, the plan and the decisions already made, then asks only what would change the implementation.</p>
+      </div>
+    </div>
+
+    <div class="stack shell" id="stack">
+      <article class="stack-card" data-stack-card>
+        <div class="stack-copy">
+          <span class="micro-label"><span class="eyebrow-dot"></span>Shared context</span>
+          <h3>Keep decisions in<br>a Project Contract.</h3>
+          <p>Frontend, database, accounts, billing and permanent rules are stored once and loaded by every agent.</p>
+          <div class="stack-foot"><span class="plus-badge"><svg class="icon"><use href="#i-plus"/></svg></span>One contract for every agent.</div>
+        </div>
+        <div class="stack-media"><img src="/assets/img/feature-contract.jpg" alt="Project Contract panel over a nebula" loading="lazy"></div>
+      </article>
+      <article class="stack-card is-flipped" data-stack-card>
+        <div class="stack-copy">
+          <span class="micro-label"><span class="eyebrow-dot"></span>Executable skills</span>
+          <h3>Turn expertise into<br>repeatable procedures.</h3>
+          <p>Skills carry procedures, questions, checks and validation so agents follow the same method every time.</p>
+          <div class="stack-foot"><span class="plus-badge"><svg class="icon"><use href="#i-plus"/></svg></span>From request to validated change.</div>
+        </div>
+        <div class="stack-media"><img src="/assets/img/feature-skills.jpg" alt="Skills panel over a nebula" loading="lazy"></div>
+      </article>
+      <article class="stack-card" data-stack-card>
+        <div class="stack-copy">
+          <span class="micro-label"><span class="eyebrow-dot"></span>Evidence trail</span>
+          <h3>See what ran, what changed<br>and who approved it.</h3>
+          <p>Each run records inputs, tools, results, durations and approval decisions so the outcome can be inspected.</p>
+          <div class="stack-foot"><span class="plus-badge"><svg class="icon"><use href="#i-plus"/></svg></span>A clear record of every run.</div>
+        </div>
+        <div class="stack-media"><img src="/assets/img/feature-history.jpg" alt="Run history panel over a star field" loading="lazy"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- INTEGRATIONS -->
+  <section class="integrations section" id="integrations">
+    <div class="shell">
+      <div class="sec-head">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>Integrations</span>
+          <h2 class="sec-title reveal">Connect the stack<br><span class="dim-lite">behind your product</span></h2>
+        </div>
+        <p class="sec-copy reveal">Connect the services your product runs on, with scoped access that you review before activation.</p>
+      </div>
+    </div>
+
+    <div class="orbit reveal" aria-hidden="true">
+      <div class="orbit-stage" id="orbitStage">
+        <div class="orbit-glow"></div>
+        <svg class="orbit-lines" viewBox="0 0 1440 800" preserveAspectRatio="none">
+          <g id="orbitArcs">
+            <path d="M170 650 A550 550 0 0 1 1270 650"/>
+            <path d="M325 650 A395 395 0 0 1 1115 650"/>
+            <path d="M440 650 A280 280 0 0 1 1000 650"/>
+            <line x1="126" y1="650" x2="1314" y2="650"/>
+          </g>
+          <g id="orbitRays">
+            <line x1="720" y1="650" x2="640" y2="120"/>
+            <line x1="720" y1="650" x2="918" y2="317"/>
+            <line x1="720" y1="650" x2="601" y2="410"/>
+            <line x1="720" y1="650" x2="267" y2="324"/>
+            <line x1="720" y1="650" x2="1037" y2="211"/>
+            <line x1="720" y1="650" x2="375" y2="453"/>
+            <line x1="720" y1="650" x2="1085" y2="551"/>
+            <line x1="720" y1="650" x2="1248" y2="577"/>
+          </g>
+        </svg>
+        <div class="orbit-hub">
+          <span class="orbit-hub-ring"></span>
+          <span class="orbit-hub-ring ring-2"></span>
+          <img src="/assets/img/power-mark.svg" alt="" width="38" height="40">
+        </div>
+        <div class="orbit-node node-lg" data-x="-80" data-y="-530"><span class="orbit-node-inner"><img src="/assets/img/brands/monday.svg" alt=""></span></div>
+        <div class="orbit-node node-lg" data-x="198" data-y="-333"><span class="orbit-node-inner"><img src="/assets/img/brands/github.svg" alt=""></span></div>
+        <div class="orbit-node node-sm" data-x="-119" data-y="-240"><span class="orbit-node-inner"><img src="/assets/img/brands/figma.svg" alt=""></span></div>
+        <div class="orbit-node node-sm" data-x="-453" data-y="-326"><span class="orbit-node-inner"><img src="/assets/img/brands/slack.svg" alt=""></span></div>
+        <div class="orbit-node node-lg" data-x="317" data-y="-439"><span class="orbit-node-inner"><img src="/assets/img/brands/notion.svg" alt=""></span></div>
+        <div class="orbit-node" data-x="-345" data-y="-197"><span class="orbit-node-inner"><img src="/assets/img/brands/googledrive.svg" alt=""></span></div>
+        <div class="orbit-node" data-x="365" data-y="-99"><span class="orbit-node-inner"><img src="/assets/img/brands/vercel.svg" alt=""></span></div>
+        <div class="orbit-node node-lg" data-x="528" data-y="-73"><span class="orbit-node-inner"><img src="/assets/img/brands/linear.svg" alt=""></span></div>
+      </div>
+    </div>
+
+    <div class="shell">
+      <div class="feature-row reveal">
+        <div class="feature-col">
+          <h3>Scoped access</h3>
+          <p>Review permissions<br>before activation.</p>
+          <svg class="icon feature-icon"><use href="#i-plug"/></svg>
+        </div>
+        <div class="feature-col">
+          <h3>Pipeline runner</h3>
+          <p>Run validation, QA and<br>delivery steps in order.</p>
+          <svg class="icon feature-icon"><use href="#i-bolt"/></svg>
+        </div>
+        <div class="feature-col">
+          <h3>Approval gate</h3>
+          <p>Require approval for<br>production changes.</p>
+          <svg class="icon feature-icon"><use href="#i-shield"/></svg>
+        </div>
+        <div class="feature-col">
+          <h3>Run history</h3>
+          <p>Inspect every<br>step and decision.</p>
+          <svg class="icon feature-icon"><use href="#i-window"/></svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BUILT IN -->
+  <section class="built section" id="built">
+    <div class="shell">
+      <div class="sec-head">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>Built in</span>
+          <h2 class="sec-title reveal">The platform under<br><span class="dim-lite">every project</span></h2>
+        </div>
+        <p class="sec-copy reveal">A live URL, a real database, scoped credentials and a clean exit. Every project gets the whole stack on day one; nothing to wire up before the first publish.</p>
+      </div>
+
+      <div class="built-grid">
+        <article class="built-card glow-card reveal">
+          <div class="built-top">
+            <span class="built-index">01 / HOST</span>
+            <span class="built-icon"><svg class="icon"><use href="#i-window"/></svg></span>
+          </div>
+          <h3>A live URL on every publish</h3>
+          <p>Ship to a real origin, keep a rollback tag, and take it offline without deleting the work.</p>
+          <span class="built-tag">Hosting</span>
+        </article>
+
+        <article class="built-card glow-card reveal">
+          <div class="built-top">
+            <span class="built-index">02 / DATA</span>
+            <span class="built-icon"><svg class="icon"><use href="#i-sliders"/></svg></span>
+          </div>
+          <h3>A database with a safety copy</h3>
+          <p>Schema changes run against a copy first, then through the same approval gate as code.</p>
+          <span class="built-tag">Postgres</span>
+        </article>
+
+        <article class="built-card glow-card reveal">
+          <div class="built-top">
+            <span class="built-index">03 / KEYS</span>
+            <span class="built-icon"><svg class="icon"><use href="#i-shield"/></svg></span>
+          </div>
+          <h3>Secrets that skip the chat</h3>
+          <p>Keys move from your browser to the runtime, scoped per integration and never stored in context.</p>
+          <span class="built-tag">Scoped access</span>
+        </article>
+
+        <article class="built-card glow-card reveal">
+          <div class="built-top">
+            <span class="built-index">04 / EXIT</span>
+            <span class="built-icon"><svg class="icon"><use href="#i-arrow-up-circle"/></svg></span>
+          </div>
+          <h3>The whole repo, still yours</h3>
+          <p>Export a real git bundle with history on every plan, ready to run anywhere you like.</p>
+          <span class="built-tag">No lock-in</span>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHANGELOG -->
+  <section class="updates section" id="changelog">
+    <div class="shell">
+      <div class="sec-head sec-head-split">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>Updates</span>
+          <h2 class="sec-title reveal">What’s new in Power</h2>
+        </div>
+        <a class="text-link reveal" href="/updates/">See all updates <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+      </div>
+
+      <div class="update-grid reveal">
+        <a class="update" href="/updates/#approval-gate">
+          <span class="update-dot"></span>
+          <h3>Approval gate</h3>
+          <p>Production changes now stop for one exact approval showing the target, the action and the risk. The model cannot skip it.</p>
+          <time datetime="2026-10-23">Oct 23, 2026</time>
+        </a>
+        <a class="update" href="/updates/#contract-editor">
+          <span class="update-dot"></span>
+          <h3>Project Contract editor</h3>
+          <p>Edit the plan, database, accounts and permanent rules in one place, so every agent starts from the same decisions.</p>
+          <time datetime="2026-10-16">Oct 16, 2026</time>
+        </a>
+        <a class="update" href="/updates/#pipeline-builder">
+          <span class="update-dot"></span>
+          <h3>Pipeline builder</h3>
+          <p>Build a pipeline from steps, checks and approval gates, and watch every step and its status.</p>
+          <time datetime="2026-10-09">Oct 9, 2026</time>
+        </a>
+        <a class="update" href="/updates/#integrations-skills-packs">
+          <span class="update-dot"></span>
+          <h3>Integrations, skills and packs</h3>
+          <p>Review an integration’s scopes before anything is connected, then let every agent use it with the least access it needs.</p>
+          <time datetime="2026-10-02">Oct 2, 2026</time>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- BY DESIGN -->
+  <section class="bydesign section" id="design">
+    <div class="shell">
+      <div class="bydesign-head">
+        <span class="eyebrow reveal"><span class="eyebrow-dot"></span>By design</span>
+        <h2 class="sec-title reveal"><span class="dim-lite">One connection, four layers,</span><br>one approval before production</h2>
+      </div>
+
+      <div class="design-grid">
+        <article class="design-card reveal">
+          <div class="design-card-bg" aria-hidden="true">
+            <div class="sky-glow"></div>
+            <img class="dune dune-a" src="/assets/img/hills-a.webp" alt="">
+            <img class="dune dune-b" src="/assets/img/hills-b.webp" alt="">
+            <img class="design-cloud cloud-a" src="/assets/img/cloud-a.png" alt="" aria-hidden="true">
+          </div>
+          <div class="design-card-content">
+            <div class="design-num">1<span>×</span></div>
+            <p>One MCP connection brings tools, skills, context and pipelines to your agent.</p>
+            <span class="glass-label"><span class="eyebrow-dot"></span>Connection</span>
+          </div>
+        </article>
+        <article class="design-card reveal">
+          <div class="design-card-bg" aria-hidden="true">
+            <div class="sky-glow"></div>
+            <img class="dune dune-a" src="/assets/img/hills-a.webp" alt="">
+            <img class="dune dune-b" src="/assets/img/hills-b.webp" alt="">
+            <img class="design-cloud cloud-b" src="/assets/img/cloud-b.png" alt="">
+          </div>
+          <div class="design-card-content">
+            <div class="design-num">15</div>
+            <p>Steps in the sample pipeline, from loading context to a human approving production.</p>
+            <span class="glass-label"><span class="eyebrow-dot"></span>Sample pipeline</span>
+          </div>
+        </article>
+      </div>
+
+      <div class="metrics">
+        <div class="metric reveal">
+          <svg class="icon metric-icon"><use href="#i-target"/></svg>
+          <div class="metric-num"><span data-count="1">0</span></div>
+          <p>MCP connection for<br>your whole stack.</p>
+        </div>
+        <div class="metric reveal">
+          <svg class="icon metric-icon"><use href="#i-arrow-up-circle"/></svg>
+          <div class="metric-num"><span data-count="100">0</span>%</div>
+          <p>of production changes<br>wait for your approval.</p>
+        </div>
+        <div class="metric reveal">
+          <svg class="icon metric-icon"><use href="#i-sparkle"/></svg>
+          <div class="metric-num"><span data-count="0">0</span></div>
+          <p>credentials stored in<br>the browser sandbox.</p>
+        </div>
+        <div class="metric reveal">
+          <svg class="icon metric-icon"><use href="#i-clock"/></svg>
+          <div class="metric-num"><span data-count="4">0</span></div>
+          <p>workflow phases: understand,<br>validate, review, ship.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="pricing section" id="pricing">
+    <div class="shell">
+      <div class="sec-head sec-head-split">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>Pricing</span>
+          <h2 class="sec-title reveal">Plans for every stage</h2>
+        </div>
+        <a class="text-link reveal" href="/pricing/">Compare plans <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+      </div>
+
+      <div class="price-grid">
+        <article class="price-card reveal">
+          <span class="plan-label">Free</span>
+          <div class="price-line"><span class="price-free">Free</span></div>
+          <p class="plan-desc">Enough to take one idea all the way to published.</p>
+          <a class="btn btn-dark btn-md" href="/docs/getting-started/">Start free</a>
+          <ul class="plan-facts">
+            <li><span>Build actions:</span><strong>100 / day</strong></li>
+            <li><span>Projects:</span><strong>3</strong></li>
+            <li><span>Every gate:</span><strong>Included</strong></li>
+          </ul>
+          <ul class="plan-list">
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Every gate and refusal</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Live database with a safe copy</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Hosting and a rollback tag</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Export and self-host</li>
+          </ul>
+        </article>
+
+        <article class="price-card is-featured reveal">
+          <span class="plan-label">Pro</span>
+          <div class="price-line"><span class="currency">$</span><span class="amount">25</span><span class="per">/month</span></div>
+          <p class="plan-desc">For someone shipping and maintaining real projects.</p>
+          <a class="btn btn-light btn-md" href="/docs/getting-started/">Choose Pro</a>
+          <ul class="plan-facts">
+            <li><span>Build actions:</span><strong>1,000 / day</strong></li>
+            <li><span>Projects:</span><strong>Unlimited</strong></li>
+            <li><span>Priority jobs:</span><strong>Included</strong></li>
+          </ul>
+          <ul class="plan-list">
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Everything in Free</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Unlimited projects</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Priority on long jobs</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Bring your own inference</li>
+          </ul>
+        </article>
+
+        <article class="price-card reveal">
+          <span class="plan-label">Power</span>
+          <div class="price-line"><span class="currency">$</span><span class="amount">100</span><span class="per">/month</span></div>
+          <p class="plan-desc">For a team running several projects at once.</p>
+          <a class="btn btn-dark btn-md" href="/docs/getting-started/">Choose Power</a>
+          <ul class="plan-facts">
+            <li><span>Build actions:</span><strong>5,000 / day</strong></li>
+            <li><span>Projects:</span><strong>Unlimited</strong></li>
+            <li><span>Priority jobs:</span><strong>Included</strong></li>
+          </ul>
+          <ul class="plan-list">
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Everything in Pro</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>5,000 build actions a day</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Priority on long jobs</li>
+            <li class="has"><span class="tick"><svg class="icon"><use href="#i-check"/></svg></span>Self-host the server</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq section" id="faq">
+    <div class="shell">
+      <div class="sec-head">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>FAQ</span>
+          <h2 class="sec-title reveal">A few useful answers.</h2>
+        </div>
+        <p class="sec-copy reveal">Learn how Power connects, what it can access and how approvals work.</p>
+      </div>
+
+      <div class="faq-layout">
+        <div class="faq-side">
+          <div class="faq-tabs reveal" role="tablist" aria-label="FAQ categories">
+            <button class="faq-tab is-active" type="button" role="tab" aria-selected="true" data-faq-tab="general">General</button>
+            <button class="faq-tab" type="button" role="tab" aria-selected="false" data-faq-tab="ai">AI &amp; Capabilities</button>
+            <button class="faq-tab" type="button" role="tab" aria-selected="false" data-faq-tab="security">Integrations &amp; Security</button>
+          </div>
+          <div class="faq-promo reveal">
+            <h3>Want to look around?</h3>
+            <p>Step into the build bench and run<br>a sample pipeline end to end.</p>
+            <a class="text-link" href="/app/">Open workspace <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+          </div>
+        </div>
+
+        <div class="faq-panels reveal">
+          <div class="faq-panel is-active" data-faq-panel="general">
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>What is Power and how does it work?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Power is a remote MCP server. You connect one endpoint to the AI you already use, and it gains the tools to build, check and ship a full-stack app. Power runs the workbench, database, secrets and hosting; the model does the thinking.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>How long does it take to set up?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Add one remote MCP endpoint to Claude, Cursor, Claude Code or any client that speaks MCP. There is nothing to install and no API key to paste.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Do I need to be a developer?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>You need to be comfortable directing an AI in plain language. Power handles the workbench and the gates; your model handles the code. Two decisions — the plan and the publish — stay yours.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Is there a free plan?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Yes. Free includes 100 build actions a day, three projects and every gate. Refused calls are refunded before the response is sent, so a gate never costs you an action.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>What’s included in the Pro plan?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Pro is $25 a month with 1,000 build actions a day, unlimited projects and priority on long jobs. Power is $100 a month with 5,000 actions a day.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Can I switch plans or cancel anytime?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Plans are monthly. Change or cancel whenever you like. Export stays free on every plan, including your full git history.</p></div>
+            </div>
+          </div>
+
+          <div class="faq-panel" data-faq-panel="ai" hidden>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>How does Power keep agents on track?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Skills carry procedures, questions, checks and validation, and the Project Contract carries your decisions and rules, so agents follow the same method every time.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Can an agent still make mistakes?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Yes. Power reduces guesswork by supplying context and validation steps, and pipelines are designed to show evidence and pause for your approval before consequential changes.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Does Power remember project decisions?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Decisions you record in the Project Contract persist for the project and are loaded by every agent, so you do not need to re-explain your architecture in each conversation.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>What can a pipeline run?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Pipelines are designed to chain steps such as loading context, validation, security checks, browser QA, staging deployment and production promotion. Power runs these steps against your project, in order, and pauses at every approval.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Can I require approval before production changes?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Yes. Production and destructive operations pause for explicit approval, and the approval identifies the action, target and risk under review.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Can it handle multi-step workflows?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Yes. Pipelines combine skills, integrations and human checkpoints in order, with conditions, retries, loops and fallbacks built in.</p></div>
+            </div>
+          </div>
+
+          <div class="faq-panel" data-faq-panel="security" hidden>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Which tools can Power connect to?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Power connects the services your project runs on — development, databases, payments, design, analytics and operations — including GitHub, Supabase, Vercel, Stripe, Framer and Sentry.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Can I connect my own MCP?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Custom MCPs can be added to a project, with the scopes they request shown for review before activation.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>What happens if an integration disconnects?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Power flags the disconnected integration and pauses any pipeline step that depends on it until access is restored.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Where do credentials live?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Credentials are encrypted server-side with AES-256-GCM and never enter the agent’s context. The browser form shows a name and fingerprint, never a value.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>Who can see my project data?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Access is scoped per workspace and project. Permissions are reviewed before an integration is activated, and credential values are scrubbed from tool results.</p></div>
+            </div>
+            <div class="acc">
+              <button class="acc-btn" type="button" aria-expanded="false"><span>How is this different from adding more MCP servers?</span><span class="acc-icon"><svg class="icon"><use href="#i-chevron-down"/></svg></span></button>
+              <div class="acc-panel"><p>Plugging in many MCP servers loads every tool definition into your agent’s context. Power is one connection: your agent searches for the capability it needs and loads only that, and it also gets your Project Contract, executable skills and approval checkpoints, not just tools.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BLOG -->
+  <section class="blog section" id="blog">
+    <div class="shell">
+      <div class="sec-head sec-head-split">
+        <div class="sec-head-main">
+          <span class="eyebrow reveal"><span class="eyebrow-dot"></span>Blog</span>
+          <h2 class="sec-title reveal">Notes on agents,<br>MCP and shipping</h2>
+        </div>
+        <a class="text-link reveal" href="/blog/">Visit blog <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+      </div>
+
+      <div class="post-grid">
+        <a class="post reveal" href="/blog/one-connection-not-twenty/">
+          <div class="post-media"><img src="/assets/img/blog-earth.jpg" alt="Earth at night seen from orbit" loading="lazy"></div>
+          <div class="post-body">
+            <h3>Why your agent needs one connection, not twenty</h3>
+            <div class="post-meta"><span>Industry</span><span class="dot-sep"></span><time datetime="2026-10-23">Oct 23, 2026</time></div>
+          </div>
+        </a>
+        <a class="post reveal" href="/blog/project-contracts/">
+          <div class="post-media"><img src="/assets/img/blog-rocket.jpg" alt="A rocket launch arcing into the night sky" loading="lazy"></div>
+          <div class="post-body">
+            <h3>Project Contracts: the decisions your agent never forgets</h3>
+            <div class="post-meta"><span>Product</span><span class="dot-sep"></span><time datetime="2026-10-16">Oct 16, 2026</time></div>
+          </div>
+        </a>
+        <a class="post reveal" href="/blog/capability-search/">
+          <div class="post-media"><img src="/assets/img/blog-stars.jpg" alt="A field of stars in the night sky" loading="lazy"></div>
+          <div class="post-body">
+            <h3>How capability search keeps tool schemas out of context</h3>
+            <div class="post-meta"><span>Engineering</span><span class="dot-sep"></span><time datetime="2026-10-09">Oct 9, 2026</time></div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="final-cta" id="start">
+    <div class="cta-inner shell">
+      <div class="cta-copy">
+        <h2>Start shipping<br>with Power</h2>
+        <p>Connect one MCP endpoint, point your agent at a project, and let it build — checked at every gate.</p>
+        <a class="btn btn-light btn-md" href="/docs/getting-started/">Open workspace</a>
+      </div>
+      <div class="cta-visual" aria-hidden="true">
+        <div class="chat-card cta-chat">
+          <div class="chat-head">
+            <img class="chat-logo" src="/assets/img/power-mark.svg" alt="" width="32" height="33">
+            <button class="chat-menu" type="button" tabindex="-1" aria-label="Workspace menu"><svg class="icon"><use href="#i-menu"/></svg></button>
+          </div>
+          <div class="chat-thread">
+            <div class="chat-line chat-line-right"><span class="bubble">Add authentication to the app.</span></div>
+            <p class="chat-note">Loading what I already know about this project.</p>
+            <div class="tool-row"><span>get_project_context</span><span class="tool-state ok">Contract loaded · 0.4s</span></div>
+            <div class="tool-row"><span>search_skills(“authentication”)</span><span class="tool-state ok">2 skills found</span></div>
+            <div class="tool-row"><span>activate_skill(auth-supabase)</span><span class="tool-state ok">Activated</span></div>
+            <p class="chat-copy">Your project uses Supabase and team accounts. Two decisions remain: how people sign in, and whether people can join multiple teams.</p>
+            <div class="tool-row"><span>request_approval(deploy: production)</span><span class="tool-state warn">Needs you</span></div>
+            <div class="chat-composer">
+              <span>Describe what you want to ship. Type @ for tools and / for pipelines.</span>
+              <div class="composer-row">
+                <div class="composer-tools">
+                  <span><svg class="icon"><use href="#i-paperclip"/></svg></span>
+                  <span><svg class="icon"><use href="#i-sliders"/></svg></span>
+                  <span><svg class="icon"><use href="#i-command"/></svg></span>
+                </div>
+                <div class="composer-send"><span class="composer-mic"><svg class="icon"><use href="#i-mic"/></svg></span><span class="composer-go"><svg class="icon"><use href="#i-arrow-up"/></svg></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <img class="cta-dunes" src="/assets/img/dunes.webp" alt="">
+    </div>
+  </section>
+

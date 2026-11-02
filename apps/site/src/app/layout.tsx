@@ -1,44 +1,72 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import './power.css';
+import Script from 'next/script';
 import { SITE } from '@/lib/site';
 import { SiteNav } from '@/components/site/nav';
+import { SiteClosing } from '@/components/site/closing';
 import { SiteFooter } from '@/components/site/footer';
 import { SmoothScroll } from '@/components/motion/smooth-scroll';
+import { IconSprite } from '@/components/site/icon-sprite';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
-  title: { default: `${SITE.name} — ${SITE.tagline}`, template: `%s — ${SITE.name}` },
+  title: { default: `${SITE.name} — ship it checked`, template: `%s — ${SITE.name}` },
   description:
-    'Power turns the AI you already pay for into a full-stack app builder whose work is checked by code before you see it. Two decisions stay yours. You get a receipt.',
-  openGraph: { type: 'website', siteName: SITE.name },
+    'Power is the MCP server that builds, checks and hosts full-stack apps. Your model does the thinking; real code execution and deterministic gates verify the work before production.',
+  openGraph: {
+    type: 'website',
+    siteName: SITE.name,
+    title: 'Power — ship it checked',
+    description:
+      'Build full-stack apps with the AI you already use. Every step is checked by real code, and two decisions stay yours.',
+    images: [
+      {
+        url: '/assets/img/hero-bg.jpg',
+        width: 1600,
+        height: 1000,
+        alt: 'Power — one connection for your AI’s tools, skills and context.',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Power — ship it checked',
+    description:
+      'Build full-stack apps with the AI you already use. Every step is checked by real code, and two decisions stay yours.',
+    images: ['/assets/img/hero-bg.jpg'],
+  },
+  icons: { icon: '/assets/img/power-mark.svg' },
 };
 
-export const viewport: Viewport = { themeColor: '#161613' };
+export const viewport: Viewport = { themeColor: '#000000' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // The head script below adds a `js` class before React hydrates, so the
-    // <html> attributes legitimately differ from what the server sent.
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js')" }}
         />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
-          href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..700;1,400..700&family=Outfit:wght@300..700&family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Inter:wght@400..700&display=swap"
-          rel="stylesheet"
+          rel="preload"
+          href="/assets/fonts/inter-latin.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin=""
         />
       </head>
       <body>
         <SmoothScroll />
-        <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-ink focus:px-3 focus:py-2 focus:text-bright">
+        <IconSprite />
+        <a className="skip-link" href="#main">
           Skip to content
         </a>
         <SiteNav />
         <main id="main">{children}</main>
+        <SiteClosing />
         <SiteFooter />
+        <Script src="/assets/js/power.js" strategy="afterInteractive" />
       </body>
     </html>
   );
