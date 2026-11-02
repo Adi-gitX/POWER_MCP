@@ -51,9 +51,10 @@ else in this list costs anything at Power's current size.
 ## Before you deploy: verify the security model
 
 **Do this first.** Power's entire tenant isolation is three mutually exclusive
-row-level security policies in Postgres. They have only ever run against PGlite,
-which is a different implementation of the same protocol, and the production
-path uses a connection-level `role` parameter that PGlite does not exercise.
+row-level security policies in Postgres. The suite has run against Postgres 16
+(CI, and locally against a container), but never against your database. Run it
+again on a throwaway one: the production path uses a connection-level `role`
+parameter, and only a real server exercises it the way production will.
 
 Create a throwaway Neon database — not the one you will deploy against — and:
 

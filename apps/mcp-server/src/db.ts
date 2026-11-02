@@ -75,14 +75,27 @@ export class DbError extends Error {
 const READ_ONLY = /^\s*(select|with|show|explain|table|values)\b/i;
 const FORBIDDEN_IN_READ = /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum)\b/i;
 
+/**
+ * The one read guard, shared by every driver.
+ *
+ * `query_database` is presented as read-only, so the driver has to make it so
+ * rather than trusting the caller's SQL. A write hidden in a CTE is the case
+ * this catches.
+ */
+export function assertReadOnly(sql: string): void {
+  if (!READ_ONLY.test(sql) || FORBIDDEN_IN_READ.test(sql)) {
+    throw new DbError('query_database is read-only. Use propose_migration for schema changes and your app code for writes.');
+  }
+}
+
 /** Canonical schema text: what the migration gate compares before/after. */
-const SCHEMA_SQL = `
+export const SCHEMA_SQL = `
   select table_name, column_name, data_type, is_nullable, column_default
   from information_schema.columns
   where table_schema = 'public'
   order by table_name, ordinal_position`;
 
-const TABLES_SQL = `
+export const TABLES_SQL = `
   select table_name from information_schema.tables
   where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name`;
 
@@ -182,9 +195,7 @@ export class PgliteDriver implements DbDriver {
   }
 
   async query(projectId: string, sql: string, limit: number): Promise<QueryResult> {
-    if (!READ_ONLY.test(sql) || FORBIDDEN_IN_READ.test(sql)) {
-      throw new DbError('query_database is read-only. Use propose_migration for schema changes and your app code for writes.');
-    }
+    assertReadOnly(sql);
     const db = await this.db(projectId, 'workbench');
     const result = await db.transaction(async (tx) => {
       await tx.query('set transaction read only');
