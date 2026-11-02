@@ -486,116 +486,357 @@ export default async function (req: IncomingMessage, res: ServerResponse): Promi
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<main>
-  <h1>${slug}</h1>
+<div class="app">
+  <aside class="rail">
+    <a class="brand" href="./">
+      <span class="mark" aria-hidden="true"></span>
+      <span>${slug}</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a class="nav-link is-current" href="#" aria-current="page">Overview</a>
+    </nav>
+    <div class="rail-foot">
+      <p class="rail-label">Account</p>
+      <p class="who" id="who">Not signed in</p>
+      <button id="signout" class="quiet small" type="button" hidden>Sign out</button>
+    </div>
+  </aside>
 
-  <section id="signed-out">
-    <p class="lead">Create an account to get started.</p>
-    <form id="auth-form">
-      <label for="email">Email</label>
-      <input id="email" name="email" type="email" required autocomplete="email">
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" required minlength="8" autocomplete="current-password">
-      <div class="row">
-        <button type="submit" data-action="signin">Sign in</button>
-        <button type="submit" data-action="signup" class="secondary">Create account</button>
-      </div>
-      <p class="error" id="auth-error" hidden></p>
-    </form>
-  </section>
+  <main class="main">
+    <section id="signed-out" aria-labelledby="start-title">
+      <div class="start">
+        <p class="eyebrow">Get started</p>
+        <h1 id="start-title">Start with one thing.</h1>
+        <p class="lede">${slug} keeps a short list of what you are working on. Create an account, add the first item, and it is saved to your own database.</p>
 
-  <section id="signed-in" hidden>
-    <p class="lead">Signed in as <strong id="who"></strong> · <a href="#" id="signout">sign out</a></p>
-    <form id="item-form">
-      <label for="title">Add an item</label>
-      <div class="row">
-        <input id="title" name="title" required placeholder="Something to do">
-        <button type="submit">Add</button>
+        <form id="auth-form" class="panel" novalidate>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com">
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" required minlength="8" autocomplete="current-password" placeholder="At least 8 characters">
+          </div>
+          <p class="error" id="auth-error" role="alert" hidden></p>
+          <div class="actions">
+            <button type="submit" data-action="signup" class="primary">Start</button>
+            <button type="submit" data-action="signin" class="quiet">I already have an account</button>
+          </div>
+          <p class="fine">Your account lives in this app's own database. Nothing is sent anywhere else.</p>
+        </form>
       </div>
-    </form>
-    <ul id="items"></ul>
-  </section>
-</main>
+    </section>
+
+    <section id="signed-in" hidden aria-labelledby="list-title">
+      <header class="head">
+        <div>
+          <p class="eyebrow">Overview</p>
+          <h1 id="list-title">Your list</h1>
+        </div>
+        <p class="head-note">Signed in as <strong id="who-in"></strong></p>
+      </header>
+
+      <div class="metrics" aria-label="Summary">
+        <div class="metric">
+          <span class="metric-value" id="count">0</span>
+          <span class="metric-label">items</span>
+        </div>
+        <div class="metric">
+          <span class="metric-value" id="state">Empty</span>
+          <span class="metric-label">status</span>
+        </div>
+      </div>
+
+      <form id="item-form" class="add" novalidate>
+        <label class="sr-only" for="title">Add an item</label>
+        <input id="title" name="title" type="text" required maxlength="200" placeholder="Add something you need to do" autocomplete="off">
+        <button type="submit" class="primary">Add</button>
+      </form>
+      <p class="error" id="item-error" role="alert" hidden></p>
+
+      <ul id="items" class="list"></ul>
+      <p id="empty" class="empty" hidden>Nothing here yet. Add the first item above.</p>
+    </section>
+  </main>
+</div>
 <script src="app.js" type="module"></script>
 </body>
 </html>
 `,
 
-    'public/styles.css': `:root { color-scheme: light dark; --line: #d8dce5; --ink: #16181d; --muted: #5b6270; --accent: #2563eb }
-* { box-sizing: border-box }
-body { margin: 0; min-height: 100vh; display: grid; place-items: start center; padding: 3rem 1.5rem;
-       font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; color: var(--ink) }
-main { width: min(34rem, 100%) }
-h1 { margin: 0 0 .5rem; font-size: 1.6rem; letter-spacing: -.02em }
-.lead { color: var(--muted); margin: 0 0 1.5rem }
-label { display: block; font-size: .85rem; font-weight: 600; margin: 1rem 0 .35rem }
-input { width: 100%; padding: .65rem .75rem; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit }
-.row { display: flex; gap: .5rem; margin-top: 1rem }
-.row input { margin: 0 }
-button { font: inherit; font-weight: 600; padding: .65rem 1.1rem; border: 1px solid transparent; border-radius: 8px;
-         background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap }
-button.secondary { background: transparent; color: inherit; border-color: var(--line) }
-ul { list-style: none; padding: 0; margin: 1.5rem 0 0; border-top: 1px solid var(--line) }
-li { padding: .75rem 0; border-bottom: 1px solid var(--line) }
-.error { color: #c0392b; font-size: .9rem }
-a { color: var(--accent) }
+    'public/styles.css': `:root {
+  color-scheme: light;
+  --bg: #fbfaf7;
+  --panel: #ffffff;
+  --ink: #141311;
+  --muted: #6d665d;
+  --faint: #9a9389;
+  --line: #e5dfd6;
+  --line-strong: #cfc7bb;
+  --accent: #141311;
+  --accent-ink: #fbfaf7;
+  --danger: #a33a2a;
+  --ok: #2f6f4f;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0f0e0d;
+    --panel: #151412;
+    --ink: #f4efe7;
+    --muted: #a49c92;
+    --faint: #756e65;
+    --line: #2a2724;
+    --line-strong: #413c37;
+    --accent: #f4efe7;
+    --accent-ink: #0f0e0d;
+    --danger: #ef9a88;
+    --ok: #9ed5a6;
+  }
+}
+* , *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--bg); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.6 var(--sans);
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+}
+h1, p, ul, figure { margin: 0; }
+ul { padding: 0; list-style: none; }
+a { color: inherit; }
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.app { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
+
+.rail {
+  border-right: 1px solid var(--line);
+  padding: 28px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600; letter-spacing: -0.02em; }
+.mark { width: 18px; height: 18px; border: 1.5px solid var(--ink); border-radius: 4px; display: inline-block; position: relative; }
+.mark::after { content: ""; position: absolute; inset: 4px; background: var(--ink); border-radius: 1px; }
+.nav { display: grid; gap: 2px; }
+.nav-link {
+  display: block; padding: 8px 10px; margin-left: -10px; border-radius: 6px;
+  text-decoration: none; font-size: 13.5px; color: var(--muted);
+}
+.nav-link:hover { color: var(--ink); background: var(--panel); }
+.nav-link.is-current { color: var(--ink); background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.rail-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 18px; }
+.rail-label { font: 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
+.who { margin-top: 8px; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-foot .quiet { margin-top: 10px; padding: 0; }
+
+.main { padding: 56px clamp(24px, 6vw, 80px) 96px; max-width: 900px; width: 100%; }
+
+.eyebrow { font: 10.5px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); }
+h1 { margin-top: 14px; font-size: clamp(30px, 4.2vw, 46px); line-height: 1.05; font-weight: 500; letter-spacing: -0.04em; }
+.lede { margin-top: 16px; max-width: 46ch; color: var(--muted); font-size: 16px; }
+
+.start { max-width: 460px; }
+.panel { margin-top: 36px; border-top: 1px solid var(--line); padding-top: 26px; }
+.field { margin-bottom: 16px; }
+label { display: block; font-size: 12.5px; font-weight: 500; margin-bottom: 7px; color: var(--muted); }
+input {
+  width: 100%; height: 44px; padding: 0 13px; border: 1px solid var(--line-strong);
+  border-radius: 8px; background: var(--panel); color: var(--ink);
+}
+input::placeholder { color: var(--faint); }
+input:hover { border-color: var(--muted); }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 22px; }
+button {
+  height: 42px; padding: 0 17px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; cursor: pointer; font-size: 14px; font-weight: 500;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); }
+button.primary:hover { opacity: 0.86; }
+button.quiet { border-color: transparent; color: var(--muted); }
+button.quiet:hover { color: var(--ink); }
+button.small { height: auto; font-size: 12.5px; }
+button:disabled { opacity: 0.5; cursor: default; }
+.fine { margin-top: 18px; font-size: 12px; line-height: 1.6; color: var(--faint); }
+.error { margin-top: 12px; font-size: 13px; color: var(--danger); }
+
+.head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+.head-note { font-size: 12px; color: var(--faint); }
+.head-note strong { color: var(--muted); font-weight: 500; }
+
+.metrics { display: flex; gap: 0; margin-top: 40px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.metric { padding: 18px 40px 18px 0; margin-right: 40px; border-right: 1px solid var(--line); min-width: 120px; }
+.metric:last-child { border-right: 0; }
+.metric-value { display: block; font-size: 26px; line-height: 1.1; letter-spacing: -0.03em; }
+.metric-label { display: block; margin-top: 5px; font: 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+
+.add { display: flex; gap: 10px; margin-top: 32px; }
+.add input { flex: 1; }
+.add button { flex: none; }
+
+.list { margin-top: 28px; border-top: 1px solid var(--line); }
+.list li { display: flex; align-items: center; gap: 12px; padding: 14px 2px; border-bottom: 1px solid var(--line); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+.item-title { overflow-wrap: anywhere; }
+.empty { margin-top: 28px; padding: 26px 20px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); font-size: 14px; }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  .rail {
+    position: static; height: auto; flex-direction: row; align-items: center;
+    border-right: 0; border-bottom: 1px solid var(--line); padding: 16px 20px; gap: 16px;
+  }
+  .nav { display: none; }
+  .rail-foot { margin: 0 0 0 auto; border: 0; padding: 0; display: flex; align-items: center; gap: 12px; }
+  .rail-label { display: none; }
+  .who { margin: 0; max-width: 150px; }
+  .main { padding: 40px 20px 72px; }
+  .metrics { overflow-x: auto; }
+  .metric { padding-right: 24px; margin-right: 24px; min-width: 100px; }
+  .add { flex-direction: column; }
+  .add button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 `,
 
     'public/app.js': `// Paths are relative on purpose: the same page is served at the site root and
-// behind a preview path prefix while the app is being built, and an absolute
-// path would escape the prefix and hit the wrong server.
+// behind a preview path prefix while the app is being built. An absolute path
+// would escape the prefix and hit the wrong server.
 const $ = (id) => document.getElementById(id);
 
 async function call(path, body) {
-  const response = await fetch(path, {
-    method: body ? 'POST' : 'GET',
-    headers: body ? { 'content-type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return { ok: response.ok, data: await response.json() };
+  try {
+    const response = await fetch(path, {
+      method: body ? 'POST' : 'GET',
+      headers: body ? { 'content-type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, data };
+  } catch (error) {
+    return { ok: false, data: { error: 'The server did not answer. Try again.' } };
+  }
+}
+
+function setError(id, message) {
+  const node = $(id);
+  if (!node) return;
+  node.hidden = !message;
+  node.textContent = message || '';
+}
+
+function rowFor(item) {
+  const row = document.createElement('li');
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const title = document.createElement('span');
+  title.className = 'item-title';
+  title.textContent = item.title;
+  row.append(dot, title);
+  return row;
 }
 
 async function render() {
-  const { data } = await call('api/me');
-  const signedIn = Boolean(data.user);
-  $('signed-out').hidden = signedIn;
-  $('signed-in').hidden = !signedIn;
-  if (!signedIn) return;
+  const me = await call('api/me');
+  const user = me.data.user || null;
 
-  $('who').textContent = data.user.email;
+  $('signed-out').hidden = Boolean(user);
+  $('signed-in').hidden = !user;
+  $('signout').hidden = !user;
+  $('who').textContent = user ? user.email : 'Not signed in';
+
+  if (!user) return;
+
+  $('who-in').textContent = user.email;
   const items = await call('api/items');
-  $('items').innerHTML = '';
-  for (const item of items.data.items ?? []) {
-    const li = document.createElement('li');
-    li.textContent = item.title;
-    $('items').append(li);
+  if (!items.ok) {
+    setError('item-error', items.data.error || 'Could not load your list.');
+    return;
   }
+
+  const rows = Array.isArray(items.data.items) ? items.data.items : [];
+  const list = $('items');
+  list.textContent = '';
+  for (const item of rows) list.append(rowFor(item));
+
+  $('count').textContent = String(rows.length);
+  $('state').textContent = rows.length ? 'Saved' : 'Empty';
+  $('empty').hidden = rows.length > 0;
 }
 
 $('auth-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const action = event.submitter?.dataset.action === 'signup' ? 'signup' : 'signin';
-  const { ok, data } = await call('api/' + action, { email: $('email').value, password: $('password').value });
-  const error = $('auth-error');
-  error.hidden = ok;
-  error.textContent = ok ? '' : data.error;
-  if (ok) await render();
+  const action = event.submitter && event.submitter.dataset.action === 'signin' ? 'signin' : 'signup';
+  const buttons = Array.from($('auth-form').querySelectorAll('button'));
+
+  const email = $('email').value.trim();
+  const password = $('password').value;
+  if (!email || password.length < 8) {
+    setError('auth-error', 'Enter an email and a password of at least 8 characters.');
+    return;
+  }
+
+  buttons.forEach((button) => { button.disabled = true; });
+  setError('auth-error', '');
+  const result = await call('api/' + action, { email, password });
+  buttons.forEach((button) => { button.disabled = false; });
+
+  if (!result.ok) {
+    setError('auth-error', result.data.error || 'That did not work.');
+    return;
+  }
+
+  $('password').value = '';
+  await render();
 });
 
 $('item-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  await call('api/items', { title: $('title').value });
+  const title = $('title').value.trim();
+  if (!title) {
+    setError('item-error', 'Give the item a name first.');
+    return;
+  }
+
+  const button = $('item-form').querySelector('button');
+  button.disabled = true;
+  setError('item-error', '');
+  const result = await call('api/items', { title });
+  button.disabled = false;
+
+  if (!result.ok) {
+    setError('item-error', result.data.error || 'Could not add that.');
+    return;
+  }
+
   $('title').value = '';
   await render();
 });
 
-$('signout').addEventListener('click', async (event) => {
-  event.preventDefault();
+$('signout').addEventListener('click', async () => {
   await call('api/signout', {});
   await render();
 });
 
-render();
+render().catch(() => setError('auth-error', 'The app could not start. Reload the page.'));
 `,
   };
 }

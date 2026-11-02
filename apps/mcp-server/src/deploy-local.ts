@@ -100,8 +100,13 @@ export class LocalDeployer implements Deployer {
   }
 
   /** Callers prepend https://, so the scheme is stripped here and added back by the route. */
+  /**
+   * A deployment URL is a URL, not a host and a path glued together. It used to
+   * drop the scheme, which made every stored link unparseable: `new URL()` reads
+   * `localhost:` as a protocol, and a browser treats the result as relative.
+   */
   private hostPart(): string {
-    return this.baseUrl.replace(/^https?:\/\//, '');
+    return this.baseUrl.replace(/\/+$/, '');
   }
 }
 

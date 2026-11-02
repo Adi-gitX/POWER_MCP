@@ -524,9 +524,12 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     const bundle = await ctx.sandbox.exportBundle(p.id);
     return {
       data: {
-        ...bundle,
-        restore_with: `git clone ${bundle.path} ${p.slug}`,
-        note: 'Full history included. This is free and always will be.',
+        download_url: `${ctx.baseUrl}/projects/${p.id}/export`,
+        bytes: bundle.bytes,
+        filename: `${p.slug}.bundle`,
+        restore_with: `git clone ${p.slug}.bundle ${p.slug}`,
+        note:
+          'Full history included. Open download_url in a browser signed in to Power; the file is free and always will be.',
       },
     };
   }),
@@ -1017,7 +1020,16 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     try {
       // A promotion, not a rebuild: that build already exists and is ready.
       const promoted = await ctx.deployer.promote(previous.deploy_project_name, previous.id, cred);
-      await ctx.store.putDeployment({ ...previous, ready_state: promoted.ready_state });
+      // Mark the release as promoted instead of writing it back unchanged.
+      // Without this `latestDeployment` still pointed at the release that was
+      // rolled away from, so get_publish_status reported the wrong live
+      // version and the history could not offer the reverse move.
+      await ctx.store.putDeployment({
+        ...previous,
+        url: promoted.aliases[0] ?? promoted.url,
+        ready_state: promoted.ready_state,
+        promoted_at: new Date().toISOString(),
+      });
       await ctx.store.putApprovals(p.id, { ...approvals, publish_confirmed_at: null });
       const url = `https://${promoted.aliases[0] ?? promoted.url}`;
       return {

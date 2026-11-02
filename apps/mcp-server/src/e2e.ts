@@ -465,7 +465,19 @@ step('  …and the gates are re-armed: writing before the new plan is refused', 
 
 console.log('\n— the exit');
 const exported = await call('export_project', { project_id: pid });
-step('export works after done, and is free', exported.ok && String(exported.data?.path).endsWith('.bundle') && exported.billed === false, exported);
+step(
+  'export works after done, and is free',
+  exported.ok && String(exported.data?.download_url).endsWith('/export') && exported.billed === false,
+  exported,
+);
+const bundle = await fetch(String(exported.data?.download_url));
+const bundleBytes = new Uint8Array(await bundle.arrayBuffer());
+const header = String.fromCharCode(...bundleBytes.slice(0, 16));
+step(
+  '  …and is downloadable from a browser URL, not a server path',
+  bundle.status === 200 && header.startsWith('# v2 git bundle'),
+  { status: bundle.status, bytes: bundleBytes.length, header },
+);
 const checkpoints = await call('list_checkpoints', { project_id: pid });
 const list = (checkpoints.data?.checkpoints as { message: string }[]) ?? [];
 step('history is real git: gate boundaries are commits', list.length >= 4, list.map((c) => c.message));

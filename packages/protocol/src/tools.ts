@@ -73,7 +73,7 @@ export const TOOLS: readonly ToolSpec[] = [
   read('read_file', ANY, 'Read a file', 'The contents of one file in the workbench.'),
   read('read_files', ANY, 'Read several files', 'Several workbench files in one call. Prefer this over repeated read_file.'),
   read('search_code', ANY, 'Search the code', 'Search the workbench for a pattern.'),
-  read('get_logs', ANY, 'Get logs', 'Runtime logs from the workbench or the live app.'),
+  read('get_logs', ANY, 'Get logs', 'The workbench preview’s own output, which is where a build error actually appears.'),
   // Not read_only, whatever its name suggests: it starts the project's dev
   // server as a child process and waits for it to answer. Free, because
   // looking at your own work should not cost a build action, and idempotent
@@ -81,7 +81,7 @@ export const TOOLS: readonly ToolSpec[] = [
   m('get_preview_url', ANY, 'Start or get the preview', 'Start the project if it is not running and return the URL where the current workbench build can be viewed.', { metered: false, idempotent: true }),
   read('get_publish_status', ANY, 'Get publish status', 'What is live, and at which version.'),
   read('list_checkpoints', ANY, 'List checkpoints', 'Restore points for this project, newest first.'),
-  read('diff', ANY, 'Diff two checkpoints', 'Changes between two checkpoints, or against the live version.'),
+  read('diff', ANY, 'Diff two checkpoints', 'Changes between two checkpoints, or between one and the current workbench.'),
 
   // ---- The exit. Free, deliberately and permanently. Not read-only: it
   // writes a bundle, which is exactly the kind of thing the old derived hint
@@ -116,7 +116,7 @@ export const TOOLS: readonly ToolSpec[] = [
 
   // ---- Data. There is no tool here that runs SQL against live, by design.
   m('provision_database', ['build'], 'Create the database', 'Create this project’s database: a live branch and a safe copy to work against.', { async: true, idempotent: true }),
-  m('pull_schema', ['build', 'verify'], 'Regenerate schema types', 'Regenerate typed helpers from the current schema.', { idempotent: true }),
+  m('pull_schema', ['build', 'verify'], 'Read the schema', 'List the tables and columns on the workbench or live branch, so the plan and the code match the database that exists.', { idempotent: true }),
   m('query_database', ['build', 'verify'], 'Query the safe copy', 'Read from the workbench copy of the database. Row-capped, and it never touches live.', { read_only: true, idempotent: true }),
   m('propose_migration', ['build'], 'Propose a schema change', 'Submit a schema change to the migration gate, which rehearses it on a copy of live and checks that it reverses cleanly.', { async: true }),
   m('promote_migration', ['verify'], 'Apply the migration to live', 'Apply a gate-passed migration to the live database. Changes production data, and a destructive change needs the project name typed in the browser first.', { live: true, async: true, destructive: true }),
