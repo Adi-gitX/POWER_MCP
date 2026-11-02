@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { signIn, signUp } from '@/lib/site';
 
 const NAV = [
   { href: '/#product', label: 'Product' },
@@ -67,8 +68,11 @@ export function SiteNav() {
           </nav>
 
           <div className="header-right">
-            <a className="btn btn-glass btn-sm" href="/docs/getting-started/">
-              Get started
+            <a className="header-signin" href={signIn}>
+              Sign in
+            </a>
+            <a className="btn btn-glass btn-sm" href={signUp}>
+              Start building
             </a>
             <button
               className="menu-toggle"
@@ -93,8 +97,11 @@ export function SiteNav() {
               {item.label}
             </a>
           ))}
-          <a href="/docs/getting-started/" onClick={() => setOpen(false)}>
-            Get started
+          <a href={signUp} onClick={() => setOpen(false)}>
+            Start building
+          </a>
+          <a href={signIn} onClick={() => setOpen(false)}>
+            Sign in
           </a>
         </nav>
       </div>

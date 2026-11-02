@@ -10,7 +10,7 @@
  * None of the approval endpoints is a tool. They are applied here, from a
  * browser, and nowhere else. The conversation can ask; it cannot answer.
  */
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, extname, join, resolve, sep } from 'node:path';
@@ -26,9 +26,10 @@ import { Jobs } from './jobs.js';
 import { LocalRuntime } from './runtime.js';
 import { FileLedger, MemoryQuota, Meter, RedisQuota, type QuotaStore } from './metering.js';
 import { configFromEnv, resourceMetadataUrl } from './oauth/metadata.js';
-import { mailerFromEnv } from './oauth/pages.js';
+import { ConsoleMailer, mailerFromEnv } from './oauth/pages.js';
 import { PowerOAuthProvider } from './oauth/provider.js';
 import { createOAuthApp, isOAuthPath } from './oauth/routes.js';
+import { sha256 } from './oauth/store.js';
 import { openPgControlPlane, openPgliteControlPlane } from './pgstore.js';
 import { LocalSandbox } from './sandbox.js';
 import { csrfField, mintCsrf, sameOrigin, verifyCsrf, CSRF_FIELD } from './csrf.js';
@@ -111,19 +112,25 @@ const controlPlane = process.env.DATABASE_URL
   ? await openPgControlPlane(process.env.DATABASE_URL)
   : await openPgliteControlPlane(join(ROOT, 'control-plane'));
 
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
 // Everything OAuth hangs off one config, validated here so a bad origin is a
 // startup failure rather than a connector that never arrives.
 const oauthConfig = configFromEnv({ ...process.env, POWER_BASE_URL: BASE_URL });
 const oauthProvider = new PowerOAuthProvider(controlPlane.oauth, oauthConfig);
+const mailer = mailerFromEnv(process.env);
 const oauthApp = createOAuthApp({
   store: controlPlane.oauth,
   controlPlane,
   config: oauthConfig,
-  mailer: mailerFromEnv(process.env),
+  mailer,
   devLogin: process.env.POWER_DEV_LOGIN === '1',
+  // A console mailer means the link went to this process's log; on loopback
+  // that is a developer's own terminal, so showing it is a convenience. Off
+  // loopback it would be an unauthenticated way into any account, so it stays
+  // in the log where only the operator can see it.
+  devLink: mailer instanceof ConsoleMailer && LOOPBACK_HOSTS.has(new URL(BASE_URL).hostname),
 });
-
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 const ALLOWED_ORIGINS = new Set(
   ['https://claude.ai', 'https://claude.com', ...(process.env.POWER_ALLOWED_ORIGINS ?? '').split(',')]
@@ -138,6 +145,13 @@ const ALLOWED_HOSTS = new Set(
 
 const auth = authenticatorFromEnv(process.env, {
   oauth: { verifier: oauthProvider, planOf: (u) => controlPlane.planOf(u), resource: oauthConfig.resource },
+  // The browser half: the same cookie the OAuth login sets. Without it the
+  // dashboard only answered bearer tokens, so a person who had just signed in
+  // was still a stranger to every page.
+  session: {
+    userIdForSession: async (id) => (await controlPlane.oauth.readSession(sha256(id)))?.user_id ?? null,
+    planOf: (u) => controlPlane.planOf(u),
+  },
   host: new URL(BASE_URL).hostname,
 });
 const quota: QuotaStore = process.env.REDIS_URL ? new RedisQuota(new Redis(process.env.REDIS_URL)) : new MemoryQuota();
@@ -231,9 +245,16 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, principal: P
 /** Everything a page needs about the person looking at it. */
 async function pageContext(principal: Principal): Promise<PageContext> {
   const remaining = await meter.remaining(principal.user_id);
+  // The address they signed in with, not the opaque id. A page that greets
+  // someone as `usr_9f3c…` reads as a leaked internal identifier.
+  const email = await controlPlane.sql
+    .query<{ email: string | null }>(`select email from users where id = $1`, [principal.user_id])
+    .then(({ rows }) => rows[0]?.email ?? null)
+    .catch(() => null);
   return {
     baseUrl: BASE_URL,
     user: principal.user_id,
+    email,
     plan: remaining.plan,
     remaining: { day: remaining.day, week: remaining.week },
   };
@@ -430,6 +451,11 @@ function preflight(req: IncomingMessage, res: ServerResponse): void {
  * `resource_metadata` pointer it has nothing to go on and the connection fails
  * with no useful error on either side.
  */
+/** A browser following a link or loading a page, not a client calling the API. */
+function browserNavigation(req: IncomingMessage): boolean {
+  return req.method === 'GET' && (req.headers.accept ?? '').includes('text/html');
+}
+
 function unauthorised(res: ServerResponse): void {
   res.setHeader(
     'www-authenticate',
@@ -445,6 +471,19 @@ function hostOf(req: IncomingMessage): string {
 }
 
 // ---------------------------------------------------------------- routing
+
+/** Read once at boot: two files, 63 KB, and every page needs them. */
+const FONTS = new Map<string, Buffer>(
+  ['inter-latin.woff2', 'fragment-mono-latin.woff2'].flatMap((name) => {
+    try {
+      return [[`/assets/fonts/${name}`, readFileSync(new URL(`../assets/fonts/${name}`, import.meta.url))] as const];
+    } catch {
+      // A checkout that has not copied the fonts yet still serves pages, in
+      // the system fallback stack, instead of refusing to start.
+      return [];
+    }
+  }),
+);
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', BASE_URL);
@@ -470,6 +509,19 @@ const server = createServer(async (req, res) => {
         'content-length': String(Buffer.byteLength(FAVICON)),
       });
       return void res.end(FAVICON);
+    }
+    // The same two faces the marketing site uses. Served from here so the app
+    // and the site are typographically identical rather than merely similar;
+    // a font that silently 404s would fall back and undo the whole design.
+    const font = FONTS.get(url.pathname);
+    if (font) {
+      res.writeHead(200, {
+        'content-type': 'font/woff2',
+        'cache-control': 'public, max-age=31536000, immutable',
+        'access-control-allow-origin': '*',
+        'content-length': String(font.length),
+      });
+      return void res.end(font);
     }
 
     // A health check that answers 200 unconditionally is worse than none: the
@@ -528,7 +580,16 @@ const server = createServer(async (req, res) => {
     }
 
     const principal = await auth.authenticate(req);
-    if (!principal) return unauthorised(res);
+    if (!principal) {
+      // A person who is not signed in gets the sign-in page and comes back to
+      // where they were. An API call still gets the bearer challenge it can
+      // act on. Without this split, the dashboard was a 401 page with no way
+      // to reach the login form that would have fixed it.
+      if (browserNavigation(req) && url.pathname !== '/mcp') {
+        return redirect(res, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
+      }
+      return unauthorised(res);
+    }
     await controlPlane.ensureUser(principal.user_id, principal.plan);
 
     // A project's preview, proxied so the URL lives on Power's own origin.

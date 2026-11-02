@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { SITE } from '@/lib/site';
+import { SITE, signIn } from '@/lib/site';
 
 const COLUMNS = [
   {
@@ -19,7 +19,8 @@ const COLUMNS = [
       { href: '/docs/getting-started/', label: 'Get started' },
       { href: '/docs/', label: 'Docs' },
       { href: '/blog/', label: 'Blog' },
-      { href: '/app/', label: 'Workspace' },
+      { href: `${SITE.app}/`, label: 'Workspace' },
+      { href: signIn, label: 'Sign in' },
       { href: SITE.github, label: 'GitHub' },
     ],
   },

@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import { SITE, signUp } from '@/lib/site';
 
 /**
  * The last screen before the footer. The home page has its own full-height
@@ -30,10 +31,10 @@ export function SiteClosing() {
           every gate.
         </p>
         <div className="closing-actions reveal">
-          <a className="btn btn-light btn-md" href="/docs/getting-started/">
+          <a className="btn btn-light btn-md" href={signUp}>
             Start building
           </a>
-          <a className="btn btn-dark btn-md" href="/app/">
+          <a className="btn btn-dark btn-md" href={`${SITE.app}/`}>
             Open workspace
           </a>
         </div>

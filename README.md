@@ -47,7 +47,7 @@ Requires Node 22 or newer and pnpm 10.
 
 ```sh
 pnpm install
-pnpm check        # typecheck + 273 unit tests
+pnpm check        # typecheck + 285 unit tests
 pnpm dev          # MCP at http://localhost:4321/mcp, browser companion at http://localhost:4321/
 ```
 
@@ -56,6 +56,12 @@ Point a client at it:
 ```sh
 claude mcp add --transport http power http://localhost:4321/mcp
 ```
+
+### Signing in
+
+Open http://localhost:4321/ in a browser. Accounts are passwordless: enter an address and follow the one-time link. On loopback with no mail provider configured, the link is also shown on the next page, so the flow works without a mailbox; set `RESEND_API_KEY` and `POWER_MAIL_FROM` to send it for real, or `POWER_DEV_LOGIN=1` to add `/login/dev` for automated runs.
+
+Signing in is what makes the companion yours. Every project, approval and secret belongs to that account, and a signed-out browser is redirected to the sign-in page and returned to the page it asked for. MCP clients reach the same account through OAuth.
 
 Then, in that client:
 
@@ -351,11 +357,11 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 
 | What | Command | Result |
 |---|---|---|
-| Unit tests | `pnpm check` | 273 tests across 16 files, plus typecheck. Three need `POWER_TEST_DATABASE_URL` and are skipped without it |
+| Unit tests | `pnpm check` | 285 tests across 17 files, plus typecheck. Three need `POWER_TEST_DATABASE_URL` and are skipped without it |
 | End to end | `pnpm dev` then `pnpm e2e` | 74 steps through a real MCP client |
 | A real model | `scripts/eval-claude.sh` | a live Claude session, transcripts committed |
 
-**Unit** (273): gates, run state, guard, migration gate, jobs, metering, secrets, the project dashboard (search, filters, settings, rename), both database drivers (including the app's own `pg` connection and real per-branch databases), OAuth, CSRF, and RLS.
+**Unit** (285): gates, run state, guard, migration gate, jobs, metering, secrets, the project dashboard (search, filters, settings, rename), browser sessions and sign-in redirects, both database drivers (including the app's own `pg` connection and real per-branch databases), OAuth, CSRF, and RLS.
 
 **End to end:** every phase gate, both human approvals, the migration gate and its typed confirmation, a leaked secret caught by the scrubber, **a person signing up inside the generated app and writing a row Power can read**, publishing with env injected, a downloadable git bundle, billing on the envelope, and a second run started on the shipped project with the gates re-armed. It drives a real MCP client over HTTP, so **the server must already be running** — `pnpm e2e` on its own fails with `ECONNREFUSED` on port 4321. It is repeatable: the metering step measures what that run spent rather than asserting an absolute quota, so consecutive runs against one server all pass.
 

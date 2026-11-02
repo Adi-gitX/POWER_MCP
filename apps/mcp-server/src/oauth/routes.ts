@@ -35,8 +35,9 @@ import {
 } from './pages.js';
 import { mintAuthorizationCode, PowerOAuthProvider } from './provider.js';
 import { randomToken, sha256, type OAuthStore } from './store.js';
+import { readCookie, SESSION_COOKIE } from './cookies.js';
 
-export const SESSION_COOKIE = 'power_session';
+export { SESSION_COOKIE, sessionIdFromHeader } from './cookies.js';
 
 export interface OAuthDeps {
   store: OAuthStore;
@@ -45,6 +46,13 @@ export interface OAuthDeps {
   mailer: Mailer;
   /** Enables /login/dev, which signs in with no email round trip. Never in production. */
   devLogin?: boolean;
+  /**
+   * Prints the sign-in link on the "check your email" page instead of only in
+   * the server log. Only when mail goes nowhere (the console mailer) and the
+   * issuer is loopback, so it cannot become an unauthenticated backdoor on a
+   * deployment that forgot to configure a mailer.
+   */
+  devLink?: boolean;
 }
 
 /** Paths the Express app owns. Checked by index.ts before its own routing. */
@@ -86,8 +94,15 @@ export function createOAuthApp(deps: OAuthDeps): Express {
 
   // ---- login
 
-  app.get('/login', (req, res) => {
-    res.type('html').send(loginPage(safeNext(req.query.next)));
+  app.get('/login', async (req, res) => {
+    const next = safeNext(req.query.next);
+    // Already signed in: the link that sent them here should not ask again.
+    // This is also what makes "Start building" on the site land in the app.
+    if (await sessionUser(req)) {
+      res.redirect(302, next);
+      return;
+    }
+    res.type('html').send(loginPage(next));
   });
 
   app.post('/login', async (req, res) => {
@@ -114,7 +129,7 @@ export function createOAuthApp(deps: OAuthDeps): Express {
     }
     // Rendered whether or not the address is known, and whether or not the
     // send succeeded, so the form cannot be used to test for an account.
-    res.type('html').send(loginSentPage(email));
+    res.type('html').send(loginSentPage(email, deps.devLink ? link : undefined));
   });
 
   app.get('/login/callback', async (req, res) => {
@@ -278,11 +293,6 @@ export function createOAuthApp(deps: OAuthDeps): Express {
   return app;
 }
 
-/** Reads the session cookie for callers outside the Express app. */
-export function sessionIdFromHeader(cookieHeader: string | undefined): string | null {
-  return readCookie(cookieHeader, SESSION_COOKIE);
-}
-
 export function newCsrfNonce(): string {
   return randomBytes(16).toString('base64url');
 }
@@ -293,23 +303,26 @@ function cookie(req: Request, name: string): string | null {
   return readCookie(req.headers.cookie, name);
 }
 
-function readCookie(header: string | undefined, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
-  }
-  return null;
-}
-
 /**
- * Only ever redirect back into the consent flow. An open `next` on a login
- * route is how a sign-in page becomes a phishing redirector.
+ * Where to go after signing in: somewhere on this origin, never anywhere else.
+ *
+ * An open `next` on a login route is how a sign-in page becomes a phishing
+ * redirector, so the value is resolved as a path and anything that changes the
+ * origin is discarded. Sign-in pages are excluded too, or an expired session
+ * could bounce between them forever.
  */
-function safeNext(value: unknown): string {
+export function safeNext(value: unknown): string {
   const next = typeof value === 'string' ? value : '';
-  return next.startsWith('/oauth/consent?req=') ? next : '/';
+  if (!next) return '/';
+  try {
+    const base = new URL('http://power.invalid');
+    const target = new URL(next, base);
+    if (target.origin !== base.origin) return '/';
+    if (target.pathname === '/login' || target.pathname === '/logout') return '/';
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return '/';
+  }
 }
 
 function constantTimeEqual(a: string, b: string): boolean {

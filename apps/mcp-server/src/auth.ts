@@ -15,6 +15,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/provider.js';
+import { sessionIdFromHeader } from './oauth/cookies.js';
 import type { Plan } from './metering.js';
 
 export interface Principal {
@@ -79,6 +80,36 @@ export class TokenAuthenticator implements Authenticator {
       if (token.length === presented.length && timingSafeEqual(token, presented)) return principal;
     }
     return null;
+  }
+}
+
+/**
+ * The browser session a person gets after signing in.
+ *
+ * This is what makes the web app an app rather than a set of pages that only
+ * answer a bearer token: the cookie is HttpOnly and host-only, and the row it
+ * names can be deleted on sign-out. The lookup is injected so this module
+ * stays a pure authenticator and the session table stays owned by OAuth.
+ *
+ * No cache here, deliberately. A cached session would keep working after
+ * sign-out for as long as the cache lived, and this path is a page load, not a
+ * chatty tool call.
+ */
+export class SessionAuthenticator implements Authenticator {
+  constructor(
+    private readonly userIdForSession: (sessionId: string) => Promise<string | null>,
+    private readonly planOf: (userId: string) => Promise<Plan>,
+  ) {}
+
+  async authenticate(req: IncomingMessage): Promise<Principal | null> {
+    // A request carrying a bearer token is an API call, not a browser. Leaving
+    // it to the cookie would let a stale cookie answer for a rejected token.
+    if (req.headers.authorization) return null;
+    const sessionId = sessionIdFromHeader(req.headers.cookie);
+    if (!sessionId) return null;
+    const userId = await this.userIdForSession(sessionId);
+    if (!userId) return null;
+    return { user_id: userId, plan: await this.planOf(userId) };
   }
 }
 
@@ -153,6 +184,8 @@ export class CompositeAuthenticator implements Authenticator {
 export interface AuthEnvDeps {
   /** Present once OAuth is wired; absent in tests that only need static tokens. */
   oauth?: { verifier: OAuthTokenVerifier; planOf: (userId: string) => Promise<Plan>; resource: string };
+  /** Browser sessions, resolved from the sign-in cookie. */
+  session?: { userIdForSession: (sessionId: string) => Promise<string | null>; planOf: (userId: string) => Promise<Plan> };
   /** Hostname the server is bound to, used to keep dev auth off a public interface. */
   host?: string;
 }
@@ -175,6 +208,9 @@ export function authenticatorFromEnv(env: NodeJS.ProcessEnv, deps: AuthEnvDeps =
   }
   if (env.POWER_TOKENS) {
     chain.push(new TokenAuthenticator(env.POWER_TOKENS));
+  }
+  if (deps.session) {
+    chain.push(new SessionAuthenticator(deps.session.userIdForSession, deps.session.planOf));
   }
 
   if (env.POWER_DEV_AUTH === '1') {

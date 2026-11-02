@@ -8,6 +8,19 @@
  */
 const DOMAIN = process.env.POWER_DOMAIN ?? 'usepower.dev';
 
+/**
+ * Where the app lives.
+ *
+ * The marketing site and the dashboard are separate origins, so every primary
+ * call to action has to be an absolute link to the server. `NEXT_PUBLIC_`
+ * because the landing is static HTML hydrated in the browser; the default is
+ * the server's own development port.
+ */
+const APP_URL =
+  process.env.NEXT_PUBLIC_POWER_APP_URL ??
+  process.env.POWER_APP_URL ??
+  (process.env.NODE_ENV === 'production' ? `https://app.${DOMAIN}` : 'http://localhost:4321');
+
 export const SITE = {
   name: 'Power',
   tagline: 'Ship it checked.',
@@ -17,7 +30,12 @@ export const SITE = {
   // The URL a person types into Claude. It has to match the server's own
   // `resource` byte for byte, including the absence of a trailing slash.
   mcp: `https://mcp.${DOMAIN}/mcp`,
+  app: APP_URL.replace(/\/+$/, ''),
 } as const;
+
+export const signIn = `${SITE.app}/login`;
+
+export const signUp = `${SITE.app}/login?next=/`;
 
 /**
  * Required by Anthropic's connector directory, and until now written and

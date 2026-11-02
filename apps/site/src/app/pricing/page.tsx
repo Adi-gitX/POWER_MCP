@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { PLANS } from '@power/protocol';
+import { signUp } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Pricing',
@@ -131,7 +132,7 @@ export default function PricingPage() {
                     )}
                   </div>
                   <p className="plan-desc">{plan.blurb}</p>
-                  <a className={`btn ${featured ? 'btn-light' : 'btn-dark'} btn-md`} href="/docs/getting-started/">
+                  <a className={`btn ${featured ? 'btn-light' : 'btn-dark'} btn-md`} href={signUp}>
                     {plan.cta}
                   </a>
                   <ul className="plan-facts">

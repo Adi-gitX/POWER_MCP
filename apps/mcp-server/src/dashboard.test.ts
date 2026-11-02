@@ -22,6 +22,7 @@ import { MemoryStore, type Approvals, type DeploymentRecord, type Project } from
 const ctx: PageContext = {
   baseUrl: 'https://power.test',
   user: 'user_ada',
+  email: 'ada@example.com',
   plan: 'pro',
   remaining: { day: 42, week: null },
 };
@@ -141,7 +142,21 @@ describe('projects page', () => {
     const html = projectsPage([], ctx);
     expect(html).toContain('No projects yet');
     expect(html).toContain('Connect an assistant');
+    expect(html).toContain('Approve and publish');
     expect(html).not.toContain('list-tools');
+  });
+
+  it('names the account by email and offers a way out', () => {
+    const html = projectsPage([], ctx);
+    expect(html).toContain('ada@example.com');
+    expect(html).toContain('href="/logout"');
+    // The opaque tenant id is not an identity a person recognises.
+    expect(html).not.toContain('user_ada');
+  });
+
+  it('falls back to the id when no address is on file', () => {
+    const html = projectsPage([], { ...ctx, email: null });
+    expect(html).toContain('user_ada');
   });
 
   it('distinguishes no matches from no projects, and keeps the search in filter links', () => {

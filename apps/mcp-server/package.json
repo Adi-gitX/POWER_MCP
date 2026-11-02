@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && node -e \"require('node:fs').cpSync('assets','dist/assets',{recursive:true})\"",
     "dev": "POWER_DEV_AUTH=1 POWER_DEV_LOGIN=1 POWER_DEPLOYER=local tsx watch src/index.ts",
     "start": "node dist/index.js",
     "e2e": "POWER_DEV_AUTH=1 POWER_DEV_LOGIN=1 POWER_DEPLOYER=local tsx src/e2e.ts"
