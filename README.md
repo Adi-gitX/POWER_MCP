@@ -47,7 +47,7 @@ Requires Node 22 or newer and pnpm 10.
 
 ```sh
 pnpm install
-pnpm check        # typecheck + 88 unit tests
+pnpm check        # typecheck + 273 unit tests
 pnpm dev          # MCP at http://localhost:4321/mcp, browser companion at http://localhost:4321/
 ```
 
@@ -351,13 +351,13 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 
 | What | Command | Result |
 |---|---|---|
-| Unit tests | `pnpm check` | 88 tests across 6 files, plus typecheck |
+| Unit tests | `pnpm check` | 273 tests across 16 files, plus typecheck. Three need `POWER_TEST_DATABASE_URL` and are skipped without it |
 | End to end | `pnpm dev` then `pnpm e2e` | 74 steps through a real MCP client |
 | A real model | `scripts/eval-claude.sh` | a live Claude session, transcripts committed |
 
-**Unit** (88): gates, run state, guard, migration gate, jobs, metering, secrets, the DB driver against real Postgres via PGlite, and RLS.
+**Unit** (273): gates, run state, guard, migration gate, jobs, metering, secrets, the project dashboard (search, filters, settings, rename), both database drivers (including the app's own `pg` connection and real per-branch databases), OAuth, CSRF, and RLS.
 
-**End to end** (74): every phase gate, both human approvals, the migration gate and its typed confirmation, a leaked secret caught by the scrubber, billing on the envelope, a second run started on the shipped project with the gates re-armed, and a `git log` showing gate trailers at the end. It drives a real MCP client over HTTP, so **the server must already be running** — `pnpm e2e` on its own fails with `ECONNREFUSED` on port 4321. It is repeatable: the metering step measures what that run spent rather than asserting an absolute quota, so consecutive runs against one server all pass.
+**End to end:** every phase gate, both human approvals, the migration gate and its typed confirmation, a leaked secret caught by the scrubber, **a person signing up inside the generated app and writing a row Power can read**, publishing with env injected, a downloadable git bundle, billing on the envelope, and a second run started on the shipped project with the gates re-armed. It drives a real MCP client over HTTP, so **the server must already be running** — `pnpm e2e` on its own fails with `ECONNREFUSED` on port 4321. It is repeatable: the metering step measures what that run spent rather than asserting an absolute quota, so consecutive runs against one server all pass.
 
 **A real model.** `scripts/eval-claude.sh` runs a Claude Code session through three phases with human approvals between them and summarises what the model did after each `ok: false`. First run, Sonnet 4.5, 2026-09-21: **12 tool calls, 1 refusal, 0 protocol errors.** The spec gate rejected the first plan for tasks without requirement references; the model fixed exactly that and passed. It never attempted an out-of-phase call, stopped at both human gates, and shipped v1 with 15 passing tests. Report and raw transcripts in `docs/evals/`.
 
@@ -374,6 +374,7 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 | `POWER_MCP_URL` | `<issuer>/mcp` | Must equal the URL a person types into their client, byte for byte |
 | `POWER_SECRET_KEY` | required off loopback | 32 bytes, base64. Secrets are encrypted at rest and there is no safe default |
 | `POWER_DEPLOYER` | unset | `local` writes releases to disk and serves them; otherwise deploys to the user's hosting account |
+| `POWER_PROJECT_DATABASE_URL` | unset | Unset, project branches are PGlite on disk, served over a socket. Set, the same driver runs on real Postgres with one database per branch |
 | `POWER_DEV_AUTH` | unset | `1` authenticates every credential-less request as a dev user. Loopback only, and it declines anything that did present a credential |
 | `POWER_DEV_LOGIN` | unset | `1` enables a browser sign-in with no email round trip, for CI |
 | `POWER_TOKENS` | unset | `tok:alice:pro,tok:bob:free` adds static bearer tokens alongside OAuth |
@@ -390,7 +391,7 @@ Everything below is behind an interface, so the hosted version is a swap rather 
 | Today (local, tested) | Hosted (same interface) |
 |---|---|
 | `LocalSandbox` — a directory and a git repo per project | Fly Machines: one app per project, `workbench` and `prod` machines, in-VM agent daemon |
-| `PgliteDriver` — branches are directory copies | Neon: one project per project, copy-on-write branches |
+| `PgliteDriver` — branches are directory copies | **Done.** `PostgresDriver` — one database per branch, template copies for rehearsal, snapshots for restore |
 | `openPgliteControlPlane` | **Done.** `openPgControlPlane` runs the same schema and the same policies on any Postgres |
 | ~~`MemorySecrets`~~ | **Done.** AES-256-GCM in Postgres, per account or per project. A per-project egress allowlist is still to come |
 | `MemoryQuota` / `FileLedger` | Redis (`RedisQuota` already exists) / Postgres ledger |
@@ -410,6 +411,6 @@ is the failure this path exists to remove.
 
 ## Not started
 
-Preview URLs (the local sandbox runs no dev server), click-to-select and annotation, a GitHub mirror, custom domains, and integration playbooks.
+Click-to-select and annotation, a GitHub mirror, custom domains and managed hosting, Neon copy-on-write provisioning behind the Postgres driver, and integration playbooks.
 
 The knowledge packs in the original prototype were Python and FastAPI shaped and were deliberately not ported; they would mislead a TypeScript build. The export-runs-anywhere CI job exists in `.github/workflows/ci.yml` but has not yet run on a hosted runner.
