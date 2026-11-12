@@ -28,7 +28,7 @@ import { FileLedger, MemoryQuota, Meter, RedisQuota, type QuotaStore } from './m
 import { configFromEnv, resourceMetadataUrl } from './oauth/metadata.js';
 import { ConsoleMailer, mailerFromEnv } from './oauth/pages.js';
 import { PowerOAuthProvider } from './oauth/provider.js';
-import { createOAuthApp, isOAuthPath } from './oauth/routes.js';
+import { createOAuthApp, isOAuthPath, signOutDestination } from './oauth/routes.js';
 import { sha256 } from './oauth/store.js';
 import { openPgControlPlane, openPgliteControlPlane } from './pgstore.js';
 import { LocalSandbox } from './sandbox.js';
@@ -130,6 +130,7 @@ const oauthApp = createOAuthApp({
   // loopback it would be an unauthenticated way into any account, so it stays
   // in the log where only the operator can see it.
   devLink: mailer instanceof ConsoleMailer && LOOPBACK_HOSTS.has(new URL(BASE_URL).hostname),
+  signOutUrl: signOutDestination(BASE_URL),
 });
 
 const ALLOWED_ORIGINS = new Set(

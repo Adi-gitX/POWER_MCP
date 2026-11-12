@@ -16,6 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { Plan } from '@power/protocol';
 import type { Sql } from '../pgstore.js';
+import type { GoogleProfile } from './google.js';
 
 export const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -73,6 +74,30 @@ export interface LoginChallenge {
   ip?: string | null;
 }
 
+/** One parked trip to Google, keyed by the hash of the state it minted. */
+export interface LoginFlow {
+  state_hash: string;
+  nonce: string;
+  code_verifier: string;
+  next: string;
+  expires_at: Date;
+}
+
+export interface AccountProfile {
+  email: string | null;
+  name: string | null;
+  onboarded: boolean;
+}
+
+/** What the account page may show about a browser session. Never its token. */
+export interface SessionSummary {
+  id_hash: string;
+  created_at: Date;
+  last_seen_at: Date;
+  user_agent: string | null;
+  ip: string | null;
+}
+
 export interface OAuthStore {
   getClient(clientId: string): Promise<OAuthClientInformationFull | undefined>;
   insertClient(client: OAuthClientInformationFull): Promise<void>;
@@ -97,12 +122,24 @@ export interface OAuthStore {
   insertLoginChallenge(c: LoginChallenge): Promise<void>;
   consumeLoginChallenge(tokenHash: string): Promise<LoginChallenge | null>;
 
+  insertLoginFlow(flow: LoginFlow): Promise<void>;
+  consumeLoginFlow(stateHash: string): Promise<LoginFlow | null>;
+
   insertSession(s: BrowserSession): Promise<void>;
   readSession(idHash: string): Promise<BrowserSession | null>;
   deleteSession(idHash: string): Promise<void>;
+  listSessions(userId: string): Promise<SessionSummary[]>;
+  deleteSessionForUser(userId: string, idHash: string): Promise<boolean>;
+  deleteAllSessions(userId: string): Promise<void>;
 
   userIdForEmail(email: string): Promise<string | null>;
+  userIdForGoogleSub(sub: string): Promise<string | null>;
   createUser(email: string, plan?: Plan): Promise<{ user_id: string; plan: Plan }>;
+  createUserWithGoogle(profile: GoogleProfile): Promise<{ user_id: string; plan: Plan }>;
+  linkGoogleAccount(userId: string, profile: GoogleProfile): Promise<void>;
+  profileOf(userId: string): Promise<AccountProfile | null>;
+  renameUser(userId: string, name: string): Promise<void>;
+  markOnboarded(userId: string): Promise<void>;
 }
 
 export class PgOAuthStore implements OAuthStore {
@@ -348,6 +385,36 @@ export class PgOAuthStore implements OAuthStore {
     });
   }
 
+  async insertLoginFlow(flow: LoginFlow): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(
+        `insert into oauth_login_flows (state_hash, nonce, code_verifier, next, expires_at) values ($1,$2,$3,$4,$5)`,
+        [flow.state_hash, flow.nonce, flow.code_verifier, flow.next, flow.expires_at],
+      );
+    });
+  }
+
+  async consumeLoginFlow(stateHash: string): Promise<LoginFlow | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<FlowRow>(
+        `update oauth_login_flows set consumed_at = now()
+          where state_hash = $1 and consumed_at is null and expires_at > now()
+          returning state_hash, nonce, code_verifier, next, expires_at`,
+        [stateHash],
+      );
+      const row = rows[0];
+      return row
+        ? {
+            state_hash: row.state_hash,
+            nonce: row.nonce,
+            code_verifier: row.code_verifier,
+            next: row.next,
+            expires_at: new Date(row.expires_at),
+          }
+        : null;
+    });
+  }
+
   async insertSession(s: BrowserSession): Promise<void> {
     await this.scoped(async (tx) => {
       await tx.query(
@@ -377,12 +444,114 @@ export class PgOAuthStore implements OAuthStore {
     });
   }
 
+  async listSessions(userId: string): Promise<SessionSummary[]> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<SessionRow>(
+        `select id_hash, user_id, created_at, expires_at, last_seen_at, user_agent, ip
+           from browser_sessions
+          where user_id = $1 and expires_at > now()
+          order by last_seen_at desc`,
+        [userId],
+      );
+      return rows.map((row) => ({
+        id_hash: row.id_hash,
+        created_at: new Date(row.created_at),
+        last_seen_at: new Date(row.last_seen_at),
+        user_agent: row.user_agent,
+        ip: row.ip,
+      }));
+    });
+  }
+
+  /** Scoped by user, so a form cannot revoke somebody else's browser. */
+  async deleteSessionForUser(userId: string, idHash: string): Promise<boolean> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<{ id_hash: string }>(
+        `delete from browser_sessions where id_hash = $1 and user_id = $2 returning id_hash`,
+        [idHash, userId],
+      );
+      return rows.length > 0;
+    });
+  }
+
+  async deleteAllSessions(userId: string): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(`delete from browser_sessions where user_id = $1`, [userId]);
+    });
+  }
+
   // ---- users
 
   async userIdForEmail(email: string): Promise<string | null> {
     return this.scoped(async (tx) => {
       const { rows } = await tx.query<{ id: string }>(`select id from users where lower(email) = lower($1)`, [email]);
       return rows[0]?.id ?? null;
+    });
+  }
+
+  async userIdForGoogleSub(sub: string): Promise<string | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<{ id: string }>(`select id from users where google_sub = $1`, [sub]);
+      return rows[0]?.id ?? null;
+    });
+  }
+
+  /**
+   * Create on first sign-in, or adopt a row that already has this verified
+   * address (a magic-link account, or the loser of a simultaneous first login).
+   * An existing, different Google subject is never overwritten.
+   */
+  async createUserWithGoogle(profile: GoogleProfile): Promise<{ user_id: string; plan: Plan }> {
+    const userId = `usr_${randomBytes(12).toString('base64url')}`;
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<{ id: string; plan: Plan }>(
+        `insert into users (id, plan, email, name, google_sub, email_verified_at, terms_accepted_at)
+         values ($1, 'free', $2, $3, $4, now(), now())
+         on conflict (lower(email)) where email is not null do update
+           set google_sub = coalesce(users.google_sub, excluded.google_sub),
+               name = coalesce(users.name, excluded.name),
+               email_verified_at = coalesce(users.email_verified_at, excluded.email_verified_at)
+         returning id, plan`,
+        [userId, profile.email, profile.name, profile.sub],
+      );
+      return { user_id: rows[0]!.id, plan: rows[0]!.plan };
+    });
+  }
+
+  async linkGoogleAccount(userId: string, profile: GoogleProfile): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(
+        `update users
+            set google_sub = $2,
+                name = coalesce(name, $3),
+                email = $4,
+                email_verified_at = now()
+          where id = $1`,
+        [userId, profile.sub, profile.name, profile.email],
+      );
+    });
+  }
+
+  async profileOf(userId: string): Promise<AccountProfile | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<{ email: string | null; name: string | null; onboarded_at: string | null }>(
+        `select email, name, onboarded_at from users where id = $1`,
+        [userId],
+      );
+      const row = rows[0];
+      return row ? { email: row.email, name: row.name, onboarded: row.onboarded_at !== null } : null;
+    });
+  }
+
+  async renameUser(userId: string, name: string): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(`update users set name = $2 where id = $1`, [userId, name]);
+    });
+  }
+
+  async markOnboarded(userId: string): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(`update users set onboarded_at = coalesce(onboarded_at, now()) where id = $1`, [userId]);
     });
   }
 
@@ -459,8 +628,19 @@ interface LoginRow {
 interface SessionRow {
   id_hash: string;
   user_id: string;
+  created_at: string;
   expires_at: string;
+  last_seen_at: string;
+  user_agent: string | null;
   ip: string | null;
+}
+
+interface FlowRow {
+  state_hash: string;
+  nonce: string;
+  code_verifier: string;
+  next: string;
+  expires_at: string;
 }
 
 const json = <T,>(value: T[] | string): T[] => (typeof value === 'string' ? (JSON.parse(value) as T[]) : value);

@@ -417,12 +417,30 @@ const added = await fetch(`${previewUrl}/api/items`, {
 step('adding a row through the app succeeds', added.status === 200, added.status);
 
 const listed = await fetch(`${previewUrl}/api/items`, { headers: { cookie } });
-const listedBody = (await listed.json()) as { items?: { title: string }[] };
+const listedBody = (await listed.json()) as {
+  items?: { id: string; title: string; done: boolean; created_at?: string }[];
+};
 step('  …and reading it back returns what was written', listedBody.items?.[0]?.title === 'first item', listedBody);
+step('  …with the fields the page renders', Boolean(listedBody.items?.[0]?.id) && typeof listedBody.items?.[0]?.done === 'boolean', listedBody);
 
 // The platform and the app are looking at one database, not two.
 const seenByPower = await call('query_database', { project_id: pid, sql: 'select title from items' });
 step('  …and Power sees the same row the app wrote', /first item/.test(JSON.stringify(seenByPower.data)), seenByPower.data);
+
+const firstItem = listedBody.items?.[0];
+const toggled = await fetch(`${previewUrl}/api/items/${firstItem?.id}`, {
+  method: 'PATCH',
+  headers: { 'content-type': 'application/json', cookie },
+  body: JSON.stringify({ done: true }),
+});
+const toggledBody = (await toggled.json()) as { item?: { done?: boolean } };
+step('marking an item done saves through the app', toggled.status === 200 && toggledBody.item?.done === true, toggled.status);
+
+const deleted = await fetch(`${previewUrl}/api/items/${firstItem?.id}`, { method: 'DELETE', headers: { cookie } });
+step('deleting an item removes it', deleted.status === 200, deleted.status);
+const afterDelete = await fetch(`${previewUrl}/api/items`, { headers: { cookie } });
+const afterDeleteBody = (await afterDelete.json()) as { items?: unknown[] };
+step('  …and it is gone from the list', afterDeleteBody.items?.length === 0, afterDeleteBody);
 
 console.log('\n— ship');
 const unconfirmed = await call('publish_app', { project_id: pid });

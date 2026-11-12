@@ -23,6 +23,7 @@ export const OAUTH_TABLES = [
   'oauth_refresh_tokens',
   'browser_sessions',
   'login_challenges',
+  'oauth_login_flows',
 ] as const;
 
 export const OAUTH_SCHEMA_SQL = `
@@ -31,6 +32,16 @@ export const OAUTH_SCHEMA_SQL = `
 -- every later assumption about ownership.
 alter table users add column if not exists email text;
 create unique index if not exists users_email_key on users (lower(email)) where email is not null;
+
+-- Google is the identity provider; the subject id is what survives an address
+-- change. Name and avatar are display data, never identity.
+alter table users add column if not exists google_sub text;
+create unique index if not exists users_google_sub_key on users (google_sub) where google_sub is not null;
+alter table users add column if not exists name text;
+alter table users add column if not exists email_verified_at timestamptz;
+alter table users add column if not exists terms_accepted_at timestamptz;
+-- Set once the first-run screen has been seen, so it never appears twice.
+alter table users add column if not exists onboarded_at timestamptz;
 
 create table if not exists oauth_clients (
   client_id text primary key,
@@ -127,4 +138,17 @@ create table if not exists login_challenges (
   ip text
 );
 create index if not exists login_challenges_email on login_challenges (email);
+
+-- One row per trip to Google. The state is hashed like every other bearer
+-- value; the verifier and nonce live only here, server-side, and the row is
+-- spent exactly once so a replayed callback cannot sign anyone in.
+create table if not exists oauth_login_flows (
+  state_hash text primary key,
+  nonce text not null,
+  code_verifier text not null,
+  next text not null default '/',
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz
+);
 `;

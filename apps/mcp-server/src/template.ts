@@ -336,18 +336,58 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, token: s
 
     if (req.method === 'GET') {
       return json(res, 200, {
-        items: await query('select id, title, done from items where user_id = $1 order by id desc', [me.id]),
+        items: await query('select id, title, done, created_at from items where user_id = $1 order by id desc', [me.id]),
       });
     }
     if (req.method === 'POST') {
       const { title } = await body(req);
       const clean = String(title ?? '').trim();
       if (!clean) return json(res, 400, { error: 'A title is required.' });
-      const row = await one('insert into items (user_id, title) values ($1,$2) returning id, title, done', [
-        me.id,
-        clean.slice(0, 200),
-      ]);
+      const row = await one(
+        'insert into items (user_id, title) values ($1,$2) returning id, title, done, created_at',
+        [me.id, clean.slice(0, 200)],
+      );
       return json(res, 200, { item: row });
+    }
+  }
+
+  const itemPath = /^\\/api\\/items\\/(\\d+)$/.exec(url.pathname);
+  if (itemPath) {
+    if (!me) return json(res, 401, { error: 'Sign in first.' });
+    const id = itemPath[1];
+
+    if (req.method === 'PATCH') {
+      const payload = await body(req);
+      const fields: string[] = [];
+      const values: unknown[] = [];
+
+      if (typeof payload.title === 'string') {
+        const clean = payload.title.trim();
+        if (!clean) return json(res, 400, { error: 'A title is required.' });
+        values.push(clean.slice(0, 200));
+        fields.push('title = $' + values.length);
+      }
+      if (typeof payload.done === 'boolean') {
+        values.push(payload.done);
+        fields.push('done = $' + values.length);
+      }
+      if (!fields.length) return json(res, 400, { error: 'Nothing to change.' });
+
+      values.push(id, me.id);
+      const row = await one(
+        'update items set ' + fields.join(', ') +
+          ' where id = $' + (values.length - 1) + ' and user_id = $' + values.length +
+          ' returning id, title, done, created_at',
+        values,
+      );
+      if (!row) return json(res, 404, { error: 'No such item.' });
+      return json(res, 200, { item: row });
+    }
+
+    if (req.method === 'DELETE') {
+      const row = await one('delete from items where id = $1 and user_id = $2 returning id', [id, me.id]);
+      if (!row) return json(res, 404, { error: 'No such item.' });
+      return json(res, 200, { ok: true });
     }
   }
 
@@ -482,84 +522,175 @@ export default async function (req: IncomingMessage, res: ServerResponse): Promi
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="${slug} — a private list for what needs doing.">
 <title>${slug}</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles.css">
+<script>
+  try {
+    var saved = localStorage.getItem('theme');
+    if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved);
+  } catch (error) {}
+</script>
 </head>
-<body>
-<div class="app">
+<body class="is-booting">
+<div class="boot" id="boot" aria-hidden="true">
+  <span class="mark mark-lg">${slug.charAt(0).toUpperCase()}</span>
+  <span class="boot-text">Opening your list</span>
+</div>
+
+<div class="app" id="app">
   <aside class="rail">
-    <a class="brand" href="./">
-      <span class="mark" aria-hidden="true"></span>
-      <span>${slug}</span>
+    <a class="brand" href="./" aria-label="${slug} home">
+      <span class="mark" aria-hidden="true">${slug.charAt(0).toUpperCase()}</span>
+      <span class="brand-name">${slug}</span>
     </a>
-    <nav class="nav" aria-label="Main">
-      <a class="nav-link is-current" href="#" aria-current="page">Overview</a>
+
+    <nav class="nav" id="workspace-nav" aria-label="Workspace" hidden>
+      <p class="nav-label">Workspace</p>
+      <a class="nav-item is-current" href="#list" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 6h.01M4 12h.01M4 18h.01M9 6h11M9 12h11M9 18h11"/>
+        </svg>
+        <span>Your list</span>
+      </a>
     </nav>
+
     <div class="rail-foot">
-      <p class="rail-label">Account</p>
-      <p class="who" id="who">Not signed in</p>
-      <button id="signout" class="quiet small" type="button" hidden>Sign out</button>
+      <div class="account" id="account" hidden>
+        <span class="avatar" id="avatar" aria-hidden="true">·</span>
+        <span class="account-copy">
+          <span class="account-email" id="who">Not signed in</span>
+          <span class="account-note">Private by default</span>
+        </span>
+      </div>
+      <div class="rail-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false">
+          <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z"/>
+          </svg>
+          <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+          </svg>
+        </button>
+        <button class="text-button" id="signout" type="button" hidden>Sign out</button>
+      </div>
     </div>
   </aside>
 
   <main class="main">
-    <section id="signed-out" aria-labelledby="start-title">
-      <div class="start">
-        <p class="eyebrow">Get started</p>
-        <h1 id="start-title">Start with one thing.</h1>
-        <p class="lede">${slug} keeps a short list of what you are working on. Create an account, add the first item, and it is saved to your own database.</p>
+    <section class="auth" id="signed-out" aria-labelledby="auth-heading">
+      <div class="auth-intro">
+        <p class="eyebrow">A private list</p>
+        <h1 id="auth-heading">A shorter list.<br>A clearer day.</h1>
+        <p class="lede">${slug} is one quiet place for the work in front of you. Add it, finish it, and keep the rest where you can see it.</p>
+        <ul class="points">
+          <li><span class="point-mark" aria-hidden="true"></span>Add what needs doing.</li>
+          <li><span class="point-mark" aria-hidden="true"></span>Check it off when it is done.</li>
+          <li><span class="point-mark" aria-hidden="true"></span>Everything stays with your account.</li>
+        </ul>
+      </div>
 
-        <form id="auth-form" class="panel" novalidate>
+      <div class="auth-card">
+        <div class="auth-tabs" role="group" aria-label="Account">
+          <button class="auth-tab is-active" type="button" aria-pressed="true" data-mode="signup">Create account</button>
+          <button class="auth-tab" type="button" aria-pressed="false" data-mode="signin">Sign in</button>
+        </div>
+        <form class="auth-form" id="auth-form" novalidate>
+          <h2 id="auth-title">Make it yours</h2>
+          <p class="auth-sub" id="auth-sub">Your account lives in this app's own database.</p>
           <div class="field">
             <label for="email">Email</label>
-            <input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com">
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
           </div>
           <div class="field">
-            <label for="password">Password</label>
-            <input id="password" name="password" type="password" required minlength="8" autocomplete="current-password" placeholder="At least 8 characters">
+            <div class="label-row">
+              <label for="password">Password</label>
+              <button class="text-button subtle" type="button" id="show-password" aria-pressed="false">Show</button>
+            </div>
+            <input id="password" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" required minlength="8">
+            <p class="hint" id="password-hint">At least 8 characters.</p>
           </div>
           <p class="error" id="auth-error" role="alert" hidden></p>
-          <div class="actions">
-            <button type="submit" data-action="signup" class="primary">Start</button>
-            <button type="submit" data-action="signin" class="quiet">I already have an account</button>
-          </div>
-          <p class="fine">Your account lives in this app's own database. Nothing is sent anywhere else.</p>
+          <button class="primary wide" type="submit" id="auth-submit">Create account</button>
+          <p class="fine" id="auth-fine">No verification email. Your password is hashed before it is stored.</p>
         </form>
       </div>
     </section>
 
-    <section id="signed-in" hidden aria-labelledby="list-title">
-      <header class="head">
-        <div>
-          <p class="eyebrow">Overview</p>
-          <h1 id="list-title">Your list</h1>
+    <section class="board" id="signed-in" hidden aria-labelledby="board-heading">
+      <header class="board-head">
+        <div class="board-title">
+          <p class="eyebrow" id="today-label">Today</p>
+          <h1 id="board-heading">Your list</h1>
+          <p class="summary" id="summary">Nothing on it yet.</p>
         </div>
-        <p class="head-note">Signed in as <strong id="who-in"></strong></p>
+        <div class="progress" aria-hidden="true">
+          <div class="progress-row">
+            <span class="progress-value" id="progress-value">0%</span>
+            <span class="progress-caption">complete</span>
+          </div>
+          <div class="progress-track"><span class="progress-fill" id="progress-fill"></span></div>
+        </div>
       </header>
 
-      <div class="metrics" aria-label="Summary">
-        <div class="metric">
-          <span class="metric-value" id="count">0</span>
-          <span class="metric-label">items</span>
+      <form class="composer" id="item-form" novalidate>
+        <span class="composer-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </span>
+        <label class="sr-only" for="title">Add an item</label>
+        <input id="title" name="title" type="text" maxlength="200" placeholder="What needs doing?" autocomplete="off" enterkeyhint="done">
+        <button class="primary" type="submit" id="add-button">Add</button>
+      </form>
+      <p class="error composer-error" id="item-error" role="alert" hidden></p>
+
+      <div class="toolbar">
+        <div class="segmented" role="group" aria-label="Show items">
+          <button class="segment is-active" type="button" aria-pressed="true" data-filter="all">All <span class="segment-count" id="count-all">0</span></button>
+          <button class="segment" type="button" aria-pressed="false" data-filter="open">Open <span class="segment-count" id="count-open">0</span></button>
+          <button class="segment" type="button" aria-pressed="false" data-filter="done">Done <span class="segment-count" id="count-done">0</span></button>
         </div>
-        <div class="metric">
-          <span class="metric-value" id="state">Empty</span>
-          <span class="metric-label">status</span>
-        </div>
+        <p class="shortcut"><kbd>N</kbd> new item</p>
       </div>
 
-      <form id="item-form" class="add" novalidate>
-        <label class="sr-only" for="title">Add an item</label>
-        <input id="title" name="title" type="text" required maxlength="200" placeholder="Add something you need to do" autocomplete="off">
-        <button type="submit" class="primary">Add</button>
-      </form>
-      <p class="error" id="item-error" role="alert" hidden></p>
+      <p class="sr-only" id="list-status" aria-live="polite"></p>
+      <ul class="list" id="list" aria-labelledby="board-heading"></ul>
 
-      <ul id="items" class="list"></ul>
-      <p id="empty" class="empty" hidden>Nothing here yet. Add the first item above.</p>
+      <div class="empty" id="empty" hidden>
+        <span class="empty-mark" aria-hidden="true"></span>
+        <p class="empty-title" id="empty-title">Nothing here yet</p>
+        <p class="empty-copy" id="empty-copy">Add the first thing above, and it will show up here.</p>
+      </div>
+
+      <footer class="board-foot">
+        <span class="foot-dot" aria-hidden="true"></span>
+        <span>Saved to your own Postgres database</span>
+        <span class="foot-sep" aria-hidden="true">·</span>
+        <span id="foot-user">Not signed in</span>
+      </footer>
+    </section>
+
+    <section class="offline" id="offline" hidden aria-labelledby="offline-heading">
+      <p class="eyebrow">Connection</p>
+      <h1 id="offline-heading">The app could not load.</h1>
+      <p class="lede">The server did not answer. If you are running this locally, check that the database and dev server are up, then try again.</p>
+      <button class="primary" type="button" id="retry">Try again</button>
     </section>
   </main>
 </div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span class="toast-text" id="toast-text"></span>
+  <button class="toast-action" type="button" id="toast-action" hidden>Undo</button>
+</div>
+
+<noscript>
+  <p class="noscript">This app needs JavaScript to sign you in and load your list.</p>
+</noscript>
+
 <script src="app.js" type="module"></script>
 </body>
 </html>
@@ -567,153 +698,467 @@ export default async function (req: IncomingMessage, res: ServerResponse): Promi
 
     'public/styles.css': `:root {
   color-scheme: light;
-  --bg: #fbfaf7;
-  --panel: #ffffff;
-  --ink: #141311;
-  --muted: #6d665d;
-  --faint: #9a9389;
-  --line: #e5dfd6;
-  --line-strong: #cfc7bb;
-  --accent: #141311;
-  --accent-ink: #fbfaf7;
-  --danger: #a33a2a;
-  --ok: #2f6f4f;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --paper: #f4f1ea;
+  --paper-deep: #eae4d9;
+  --surface: #faf8f2;
+  --surface-raised: #fffdf8;
+  --ink: #1e1b16;
+  --muted: #6c6457;
+  --faint: #988f80;
+  --line: #e0d8ca;
+  --line-strong: #c8bdab;
+  --accent: #b04724;
+  --accent-hover: #963a1c;
+  --accent-ink: #fff9f2;
+  --accent-soft: #f2dfd3;
+  --ok: #436c4f;
+  --ok-soft: #e4ece1;
+  --danger: #a13a2a;
+  --danger-soft: #f4e2de;
+  --shadow: 0 1px 2px rgba(35, 28, 18, 0.04), 0 14px 34px rgba(35, 28, 18, 0.07);
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #141310;
+  --paper-deep: #211e19;
+  --surface: #1a1815;
+  --surface-raised: #201d19;
+  --ink: #f1ece2;
+  --muted: #a79e90;
+  --faint: #7b7264;
+  --line: #2d2923;
+  --line-strong: #453f35;
+  --accent: #de7b53;
+  --accent-hover: #e98a63;
+  --accent-ink: #1b100b;
+  --accent-soft: #38251b;
+  --ok: #8ab58f;
+  --ok-soft: #233024;
+  --danger: #e89481;
+  --danger-soft: #38241f;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 18px 40px rgba(0, 0, 0, 0.28);
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0f0e0d;
-    --panel: #151412;
-    --ink: #f4efe7;
-    --muted: #a49c92;
-    --faint: #756e65;
-    --line: #2a2724;
-    --line-strong: #413c37;
-    --accent: #f4efe7;
-    --accent-ink: #0f0e0d;
-    --danger: #ef9a88;
-    --ok: #9ed5a6;
+    --paper: #141310;
+    --paper-deep: #211e19;
+    --surface: #1a1815;
+    --surface-raised: #201d19;
+    --ink: #f1ece2;
+    --muted: #a79e90;
+    --faint: #7b7264;
+    --line: #2d2923;
+    --line-strong: #453f35;
+    --accent: #de7b53;
+    --accent-hover: #e98a63;
+    --accent-ink: #1b100b;
+    --accent-soft: #38251b;
+    --ok: #8ab58f;
+    --ok-soft: #233024;
+    --danger: #e89481;
+    --danger-soft: #38241f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 18px 40px rgba(0, 0, 0, 0.28);
   }
 }
-* , *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html { background: var(--bg); }
+html { background: var(--paper); }
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
+  background: var(--paper);
   color: var(--ink);
-  font: 15px/1.6 var(--sans);
+  font: 15px/1.55 var(--sans);
   letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-h1, p, ul, figure { margin: 0; }
+h1, h2, p, ul, figure { margin: 0; }
 ul { padding: 0; list-style: none; }
 a { color: inherit; }
 button, input { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+button { cursor: pointer; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-.app { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
+.app {
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  min-height: 100vh;
+  opacity: 1;
+  transition: opacity 0.35s ease;
+}
+body.is-booting .app { opacity: 0; }
+
+.boot {
+  position: fixed; inset: 0; z-index: 30;
+  display: grid; place-content: center; justify-items: center; gap: 16px;
+  background: var(--paper);
+  transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+body:not(.is-booting) .boot { opacity: 0; visibility: hidden; }
+.boot-text {
+  font: 10px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint);
+}
+.boot .mark { animation: breathe 1.6s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.97); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.mark {
+  width: 28px; height: 28px; flex: none; border-radius: 7px;
+  display: grid; place-items: center;
+  background: var(--ink); color: var(--paper);
+  font: 600 14px/1 var(--serif);
+}
+.mark-lg { width: 46px; height: 46px; border-radius: 11px; font-size: 21px; }
 
 .rail {
+  position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column; gap: 38px;
+  padding: 30px 26px 26px;
   border-right: 1px solid var(--line);
-  padding: 28px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  background: var(--paper);
 }
-.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600; letter-spacing: -0.02em; }
-.mark { width: 18px; height: 18px; border: 1.5px solid var(--ink); border-radius: 4px; display: inline-block; position: relative; }
-.mark::after { content: ""; position: absolute; inset: 4px; background: var(--ink); border-radius: 1px; }
-.nav { display: grid; gap: 2px; }
-.nav-link {
-  display: block; padding: 8px 10px; margin-left: -10px; border-radius: 6px;
+.brand {
+  display: inline-flex; align-items: center; gap: 11px;
+  text-decoration: none; font-weight: 600; letter-spacing: -0.02em;
+}
+.brand-name { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav { display: grid; gap: 9px; }
+.nav-label {
+  padding-left: 10px;
+  font: 9.5px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint);
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 8px;
   text-decoration: none; font-size: 13.5px; color: var(--muted);
+  transition: color 0.15s ease, background 0.15s ease;
 }
-.nav-link:hover { color: var(--ink); background: var(--panel); }
-.nav-link.is-current { color: var(--ink); background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
-.rail-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 18px; }
-.rail-label { font: 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
-.who { margin-top: 8px; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-foot .quiet { margin-top: 10px; padding: 0; }
+.nav-item:hover { color: var(--ink); background: var(--surface); }
+.nav-item.is-current { color: var(--ink); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.nav-item svg { width: 16px; height: 16px; flex: none; }
 
-.main { padding: 56px clamp(24px, 6vw, 80px) 96px; max-width: 900px; width: 100%; }
+.rail-foot { margin-top: auto; display: grid; gap: 12px; }
+.account {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding-top: 17px; border-top: 1px solid var(--line);
+}
+.avatar {
+  width: 32px; height: 32px; flex: none; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+  font: 600 12px/1 var(--mono); text-transform: uppercase;
+}
+.account-copy { display: grid; gap: 2px; min-width: 0; }
+.account-email { font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-note { font: 9.5px/1.2 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+.rail-actions { display: flex; align-items: center; gap: 2px; }
+.icon-button {
+  width: 34px; height: 34px; flex: none; border-radius: 8px;
+  border: 1px solid transparent; background: transparent;
+  display: grid; place-items: center; color: var(--muted);
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.icon-button:hover { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.icon { width: 16px; height: 16px; display: block; }
+.icon-sun { display: none; }
+.icon-moon { display: block; }
+:root[data-theme="dark"] .icon-sun { display: block; }
+:root[data-theme="dark"] .icon-moon { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .icon-sun { display: block; }
+  :root:not([data-theme="light"]) .icon-moon { display: none; }
+}
+.text-button {
+  border: 0; background: transparent; border-radius: 6px;
+  padding: 5px 7px; font-size: 12px; color: var(--muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.text-button:hover { color: var(--ink); background: var(--surface); }
+.text-button.subtle { font-size: 11px; padding: 2px 4px; }
+.text-button:disabled { opacity: 0.5; cursor: default; }
 
-.eyebrow { font: 10.5px/1 var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); }
-h1 { margin-top: 14px; font-size: clamp(30px, 4.2vw, 46px); line-height: 1.05; font-weight: 500; letter-spacing: -0.04em; }
-.lede { margin-top: 16px; max-width: 46ch; color: var(--muted); font-size: 16px; }
+.main {
+  width: 100%; max-width: 1060px;
+  padding: clamp(34px, 5vw, 64px) clamp(24px, 5vw, 72px) 76px;
+}
 
-.start { max-width: 460px; }
-.panel { margin-top: 36px; border-top: 1px solid var(--line); padding-top: 26px; }
-.field { margin-bottom: 16px; }
-label { display: block; font-size: 12.5px; font-weight: 500; margin-bottom: 7px; color: var(--muted); }
+.eyebrow {
+  display: flex; align-items: center; gap: 9px;
+  font: 10px/1 var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint);
+}
+.eyebrow::before { content: ""; display: inline-block; width: 18px; height: 1px; background: var(--line-strong); }
+h1 {
+  margin-top: 22px;
+  font-family: var(--serif); font-weight: 500;
+  font-size: clamp(38px, 5.2vw, 62px); line-height: 0.99; letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.lede { margin-top: 22px; max-width: 42ch; font-size: 16px; line-height: 1.65; color: var(--muted); }
+
+.auth {
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(340px, 420px);
+  gap: clamp(36px, 6vw, 92px); align-items: start;
+  max-width: 980px; padding-top: clamp(4px, 4vh, 44px);
+}
+.auth-intro { padding-top: 8px; }
+.points {
+  display: grid; gap: 13px; max-width: 360px;
+  margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--line);
+}
+.points li { display: flex; align-items: center; gap: 11px; font-size: 13.5px; color: var(--muted); }
+.point-mark { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--accent); }
+
+.auth-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+}
+.auth-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  padding: 4px; border-radius: 9px; background: var(--paper-deep);
+}
+.auth-tab {
+  padding: 9px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted);
+  font-size: 12.5px; font-weight: 500;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.auth-tab:hover { color: var(--ink); }
+.auth-tab.is-active { background: var(--surface-raised); color: var(--ink); box-shadow: 0 1px 2px rgba(30, 24, 16, 0.08); }
+.auth-form { padding: 24px 22px 22px; }
+.auth-form h2 {
+  font-family: var(--serif); font-size: 27px; line-height: 1.1;
+  font-weight: 500; letter-spacing: -0.025em;
+}
+.auth-sub { margin-top: 8px; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.field { margin-top: 18px; }
+label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.label-row { display: flex; align-items: center; justify-content: space-between; }
+.label-row label { margin-bottom: 7px; }
 input {
-  width: 100%; height: 44px; padding: 0 13px; border: 1px solid var(--line-strong);
-  border-radius: 8px; background: var(--panel); color: var(--ink);
+  width: 100%; height: 44px; padding: 0 13px;
+  border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface-raised); color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 input::placeholder { color: var(--faint); }
 input:hover { border-color: var(--muted); }
-.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 22px; }
-button {
-  height: 42px; padding: 0 17px; border-radius: 8px; border: 1px solid transparent;
-  background: transparent; cursor: pointer; font-size: 14px; font-weight: 500;
-  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.hint { margin-top: 7px; font-size: 11.5px; color: var(--faint); }
+.error {
+  margin-top: 14px; padding: 9px 11px;
+  border-radius: 7px; background: var(--danger-soft);
+  color: var(--danger); font-size: 12.5px; line-height: 1.5;
 }
-button.primary { background: var(--accent); color: var(--accent-ink); }
-button.primary:hover { opacity: 0.86; }
-button.quiet { border-color: transparent; color: var(--muted); }
-button.quiet:hover { color: var(--ink); }
-button.small { height: auto; font-size: 12.5px; }
-button:disabled { opacity: 0.5; cursor: default; }
-.fine { margin-top: 18px; font-size: 12px; line-height: 1.6; color: var(--faint); }
-.error { margin-top: 12px; font-size: 13px; color: var(--danger); }
+.primary {
+  height: 42px; padding: 0 18px;
+  border: 1px solid var(--accent); border-radius: 8px;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 13.5px; font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.primary:active { transform: translateY(1px); }
+.primary:disabled { opacity: 0.55; cursor: default; transform: none; }
+.primary.wide { width: 100%; height: 44px; margin-top: 20px; }
+.fine { margin-top: 17px; font-size: 11.5px; line-height: 1.6; color: var(--faint); }
 
-.head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
-.head-note { font-size: 12px; color: var(--faint); }
-.head-note strong { color: var(--muted); font-weight: 500; }
+.board { max-width: 760px; }
+.board-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; flex-wrap: wrap;
+  padding-bottom: 28px; border-bottom: 1px solid var(--line);
+}
+.board h1 { margin-top: 16px; font-size: clamp(34px, 4.4vw, 50px); }
+.summary { margin-top: 11px; font-size: 13.5px; color: var(--muted); }
+.progress { width: 190px; padding-bottom: 5px; }
+.progress-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.progress-value { font-family: var(--serif); font-size: 26px; letter-spacing: -0.02em; }
+.progress-caption { font: 9.5px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+.progress-track { margin-top: 9px; height: 4px; border-radius: 99px; background: var(--paper-deep); overflow: hidden; }
+.progress-fill {
+  display: block; height: 100%; width: 0;
+  border-radius: inherit; background: var(--accent);
+  transition: width 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
 
-.metrics { display: flex; gap: 0; margin-top: 40px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.metric { padding: 18px 40px 18px 0; margin-right: 40px; border-right: 1px solid var(--line); min-width: 120px; }
-.metric:last-child { border-right: 0; }
-.metric-value { display: block; font-size: 26px; line-height: 1.1; letter-spacing: -0.03em; }
-.metric-label { display: block; margin-top: 5px; font: 10px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+.composer {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 28px; padding: 7px 7px 7px 14px;
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  background: var(--surface-raised);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer-icon { display: grid; place-items: center; flex: none; color: var(--faint); }
+.composer-icon svg { width: 18px; height: 18px; }
+.composer input { flex: 1; min-width: 0; height: 40px; padding: 0 2px; border: 0; background: transparent; }
+.composer input:hover { border-color: transparent; }
+.composer input:focus, .composer input:focus-visible { outline: none; box-shadow: none; }
+.composer .primary { height: 38px; }
+.composer-error { margin-top: 10px; }
 
-.add { display: flex; gap: 10px; margin-top: 32px; }
-.add input { flex: 1; }
-.add button { flex: none; }
+.toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 26px;
+}
+.segmented {
+  display: inline-flex; gap: 2px; padding: 3px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+}
+.segment {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font-size: 12px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.segment:hover { color: var(--ink); }
+.segment.is-active { background: var(--surface-raised); color: var(--ink); box-shadow: 0 1px 2px rgba(30, 24, 16, 0.07); }
+.segment-count { min-width: 10px; text-align: center; font: 10px/1 var(--mono); color: var(--faint); }
+.segment.is-active .segment-count { color: var(--accent); }
+.shortcut { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); }
+kbd {
+  padding: 3px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
+  background: var(--surface); color: var(--muted); font: 10px/1 var(--mono);
+}
 
-.list { margin-top: 28px; border-top: 1px solid var(--line); }
-.list li { display: flex; align-items: center; gap: 12px; padding: 14px 2px; border-bottom: 1px solid var(--line); }
-.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
-.item-title { overflow-wrap: anywhere; }
-.empty { margin-top: 28px; padding: 26px 20px; border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); font-size: 14px; }
+.list { margin-top: 14px; border-top: 1px solid var(--line); }
+.item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 15px 2px; border-bottom: 1px solid var(--line);
+}
+.item-check {
+  width: 22px; height: 22px; flex: none; margin-top: 1px; padding: 0;
+  border: 1.5px solid var(--line-strong); border-radius: 50%;
+  background: transparent; color: transparent;
+  display: grid; place-items: center;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.item-check:hover { border-color: var(--accent); color: var(--accent); }
+.item-check svg { width: 12px; height: 12px; opacity: 0; transition: opacity 0.15s ease; }
+.item-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.item-title { font-size: 14.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.item-meta {
+  font: 9.5px/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint);
+}
+.item-delete {
+  width: 30px; height: 30px; flex: none; padding: 0;
+  border: 0; border-radius: 6px; background: transparent;
+  display: grid; place-items: center; color: var(--faint);
+  opacity: 0; transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.item:hover .item-delete, .item:focus-within .item-delete { opacity: 1; }
+.item-delete:hover { color: var(--danger); background: var(--danger-soft); }
+.item-delete svg { width: 14px; height: 14px; }
+.item.is-done .item-check { background: var(--ok); border-color: var(--ok); color: var(--surface-raised); }
+.item.is-done .item-check svg { opacity: 1; }
+.item.is-done .item-title { color: var(--faint); text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: var(--line-strong); }
+.item.is-done .item-meta { color: var(--faint); }
 
-@media (max-width: 760px) {
-  .app { grid-template-columns: 1fr; }
+.empty {
+  margin-top: 16px; padding: 44px 24px;
+  border: 1px dashed var(--line-strong); border-radius: 12px;
+  background: var(--surface); text-align: center;
+}
+.empty-mark {
+  position: relative; display: block;
+  width: 34px; height: 34px; margin: 0 auto 16px;
+  border: 1.5px solid var(--line-strong); border-radius: 50%;
+}
+.empty-mark::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong);
+}
+.empty-title { font-family: var(--serif); font-size: 19px; letter-spacing: -0.01em; }
+.empty-copy { max-width: 38ch; margin: 6px auto 0; font-size: 13px; line-height: 1.55; color: var(--muted); }
+
+.board-foot {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 32px;
+  font: 9.5px/1.4 var(--mono); letter-spacing: 0.07em; text-transform: uppercase; color: var(--faint);
+}
+.foot-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--ok); }
+.foot-sep { color: var(--line-strong); }
+
+.offline { max-width: 540px; padding-top: 9vh; }
+.offline h1 { font-size: clamp(34px, 4vw, 46px); }
+.offline .lede { max-width: 46ch; }
+.offline .primary { margin-top: 26px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 26px; z-index: 40;
+  display: flex; align-items: center; gap: 14px;
+  max-width: calc(100vw - 32px);
+  padding: 11px 12px 11px 16px;
+  border-radius: 9px; background: var(--ink); color: var(--paper);
+  box-shadow: var(--shadow); font-size: 13px;
+  opacity: 0; transform: translate(-50%, 8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.toast-action {
+  flex: none; padding: 4px 8px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--accent-ink);
+  font-size: 13px; font-weight: 600;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.toast-action:hover { background: rgba(255, 255, 255, 0.1); }
+.noscript {
+  position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 50;
+  margin: 0; padding: 14px 16px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface-raised); color: var(--muted); font-size: 13px;
+}
+
+@media (max-width: 1024px) {
+  .auth { grid-template-columns: 1fr; gap: 38px; max-width: 520px; margin-inline: auto; }
+  .auth-intro { padding-top: 0; }
+  .points { max-width: none; }
+}
+@media (max-width: 1024px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .rail {
-    position: static; height: auto; flex-direction: row; align-items: center;
-    border-right: 0; border-bottom: 1px solid var(--line); padding: 16px 20px; gap: 16px;
+    position: static; height: auto; z-index: 10;
+    flex-direction: row; align-items: center; gap: 14px;
+    padding: 14px 18px; border-right: 0; border-bottom: 1px solid var(--line);
   }
-  .nav { display: none; }
-  .rail-foot { margin: 0 0 0 auto; border: 0; padding: 0; display: flex; align-items: center; gap: 12px; }
-  .rail-label { display: none; }
-  .who { margin: 0; max-width: 150px; }
-  .main { padding: 40px 20px 72px; }
-  .metrics { overflow-x: auto; }
-  .metric { padding-right: 24px; margin-right: 24px; min-width: 100px; }
-  .add { flex-direction: column; }
-  .add button { width: 100%; }
+  .nav, .account { display: none; }
+  .rail-foot { margin: 0 0 0 auto; display: flex; align-items: center; gap: 2px; }
+  .rail-actions { gap: 2px; }
+  .main { padding: 30px 18px 56px; }
+  .board { margin-inline: auto; }
+  .auth { padding-top: 0; }
+  .auth-card { padding: 7px; }
+  .auth-form { padding: 21px 17px 19px; }
+  h1 { font-size: clamp(34px, 10vw, 48px); }
+  .board-head { align-items: flex-start; gap: 20px; padding-bottom: 24px; }
+  .progress { width: 100%; max-width: 230px; }
+  .composer { padding: 6px 6px 6px 12px; }
+  .composer .primary { padding: 0 14px; }
+  .toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .shortcut { display: none; }
+  .item-delete { opacity: 0.55; }
+  .toast { bottom: 16px; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (hover: none) {
+  .item-delete { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
 `,
 
     'public/app.js': `// Paths are relative on purpose: the same page is served at the site root and
@@ -721,18 +1166,36 @@ button:disabled { opacity: 0.5; cursor: default; }
 // would escape the prefix and hit the wrong server.
 const $ = (id) => document.getElementById(id);
 
-async function call(path, body) {
+let items = [];
+let filter = 'all';
+let mode = 'signup';
+let toastTimer = null;
+let toastHideTimer = null;
+
+const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5"/></svg>';
+const TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>';
+
+async function call(path, options) {
   try {
-    const response = await fetch(path, {
-      method: body ? 'POST' : 'GET',
-      headers: body ? { 'content-type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const data = await response.json().catch(() => ({}));
-    return { ok: response.ok, data };
+    const response = await fetch(path, options);
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (error) {
+      data = {};
+    }
+    return { ok: response.ok, status: response.status, data };
   } catch (error) {
-    return { ok: false, data: { error: 'The server did not answer. Try again.' } };
+    return { ok: false, status: 0, data: { error: 'The server did not answer. Try again.' } };
   }
+}
+
+function sendJson(path, method, body) {
+  return call(path, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 function setError(id, message) {
@@ -742,62 +1205,371 @@ function setError(id, message) {
   node.textContent = message || '';
 }
 
-function rowFor(item) {
+function formatDate() {
+  const now = new Date();
+  try {
+    return new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(now);
+  } catch (error) {
+    return now.toDateString();
+  }
+}
+
+function relativeTime(value) {
+  if (!value) return '';
+  const then = new Date(value).getTime();
+  if (!isFinite(then)) return '';
+  const diff = Date.now() - then;
+  const minute = 60000;
+  const hour = minute * 60;
+  const day = hour * 24;
+  if (diff < minute) return 'just now';
+  if (diff < hour) return Math.floor(diff / minute) + 'm ago';
+  if (diff < day) return Math.floor(diff / hour) + 'h ago';
+  if (diff < day * 2) return 'yesterday';
+  try {
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(then));
+  } catch (error) {
+    return '';
+  }
+}
+
+function itemRow(item) {
   const row = document.createElement('li');
-  const dot = document.createElement('span');
-  dot.className = 'dot';
-  dot.setAttribute('aria-hidden', 'true');
-  const title = document.createElement('span');
+  row.className = 'item' + (item.done ? ' is-done' : '');
+  row.dataset.id = String(item.id);
+
+  const check = document.createElement('button');
+  check.type = 'button';
+  check.className = 'item-check';
+  check.setAttribute('role', 'checkbox');
+  check.setAttribute('aria-checked', item.done ? 'true' : 'false');
+  check.setAttribute('aria-label', (item.done ? 'Mark as open: ' : 'Mark as done: ') + item.title);
+  check.innerHTML = CHECK_ICON;
+  check.addEventListener('click', (event) => toggleItem(item, event.detail === 0));
+
+  const body = document.createElement('div');
+  body.className = 'item-body';
+  const title = document.createElement('p');
   title.className = 'item-title';
   title.textContent = item.title;
-  row.append(dot, title);
+  const meta = document.createElement('p');
+  meta.className = 'item-meta';
+  meta.textContent = item.done ? 'Done' : 'Added ' + relativeTime(item.created_at);
+  body.append(title, meta);
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'item-delete';
+  remove.setAttribute('aria-label', 'Delete: ' + item.title);
+  remove.innerHTML = TRASH_ICON;
+  remove.addEventListener('click', () => deleteItem(item));
+
+  row.append(check, body, remove);
   return row;
 }
 
-async function render() {
-  const me = await call('api/me');
-  const user = me.data.user || null;
+function counts() {
+  const done = items.filter((item) => item.done).length;
+  return { done: done, open: items.length - done, all: items.length };
+}
 
-  $('signed-out').hidden = Boolean(user);
-  $('signed-in').hidden = !user;
-  $('signout').hidden = !user;
-  $('who').textContent = user ? user.email : 'Not signed in';
+function visibleItems() {
+  const shown = items.filter((item) => {
+    if (filter === 'open') return !item.done;
+    if (filter === 'done') return item.done;
+    return true;
+  });
+  return shown.sort((a, b) => {
+    if (Boolean(a.done) !== Boolean(b.done)) return a.done ? 1 : -1;
+    return Number(b.id) - Number(a.id);
+  });
+}
 
-  if (!user) return;
+function renderCounts() {
+  const numbers = counts();
+  $('count-all').textContent = String(numbers.all);
+  $('count-open').textContent = String(numbers.open);
+  $('count-done').textContent = String(numbers.done);
+  $('summary').textContent = numbers.all === 0
+    ? 'Nothing on it yet.'
+    : numbers.open + ' open · ' + numbers.done + ' done';
 
-  $('who-in').textContent = user.email;
-  const items = await call('api/items');
-  if (!items.ok) {
-    setError('item-error', items.data.error || 'Could not load your list.');
+  const percent = numbers.all === 0 ? 0 : Math.round((numbers.done / numbers.all) * 100);
+  $('progress-value').textContent = percent + '%';
+  $('progress-fill').style.width = percent + '%';
+}
+
+function emptyCopy() {
+  if (filter === 'open') {
+    return { title: 'Everything is done', copy: 'Nothing is waiting on you. Add something new when you are ready.' };
+  }
+  if (filter === 'done') {
+    return { title: 'Nothing finished yet', copy: 'Check something off, and it will rest here.' };
+  }
+  return { title: 'Nothing here yet', copy: 'Add the first thing above, and it will show up here.' };
+}
+
+function renderList() {
+  const shown = visibleItems();
+  const list = $('list');
+  list.textContent = '';
+  for (const item of shown) list.append(itemRow(item));
+
+  const empty = $('empty');
+  empty.hidden = shown.length > 0;
+  if (!shown.length) {
+    const copy = emptyCopy();
+    $('empty-title').textContent = copy.title;
+    $('empty-copy').textContent = copy.copy;
+  }
+
+  $('list-status').textContent = shown.length + (shown.length === 1 ? ' item shown.' : ' items shown.');
+}
+
+function renderAll() {
+  renderCounts();
+  renderList();
+}
+
+function updateFilterButtons() {
+  document.querySelectorAll('[data-filter]').forEach((button) => {
+    const active = button.dataset.filter === filter;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function focusAfterChange(id) {
+  const next = document.querySelector('[data-id="' + id + '"] .item-check');
+  if (next) {
+    next.focus();
+    return;
+  }
+  if (!$('signed-in').hidden) $('title').focus();
+}
+
+function replaceItem(updated) {
+  if (!updated) return;
+  items = items.map((item) => (String(item.id) === String(updated.id) ? updated : item));
+}
+
+async function toggleItem(item, restoreFocus) {
+  const next = !item.done;
+  item.done = next;
+  renderAll();
+  if (restoreFocus) focusAfterChange(item.id);
+
+  const result = await sendJson('api/items/' + encodeURIComponent(item.id), 'PATCH', { done: next });
+  if (!result.ok) {
+    item.done = !next;
+    renderAll();
+    if (restoreFocus) focusAfterChange(item.id);
+    showToast(result.data.error || 'That change did not save.');
     return;
   }
 
-  const rows = Array.isArray(items.data.items) ? items.data.items : [];
-  const list = $('items');
-  list.textContent = '';
-  for (const item of rows) list.append(rowFor(item));
-
-  $('count').textContent = String(rows.length);
-  $('state').textContent = rows.length ? 'Saved' : 'Empty';
-  $('empty').hidden = rows.length > 0;
+  replaceItem(result.data.item);
+  renderAll();
+  if (restoreFocus) focusAfterChange(item.id);
 }
+
+async function restoreItem(item) {
+  const created = await sendJson('api/items', 'POST', { title: item.title });
+  if (!created.ok) {
+    showToast(created.data.error || 'That item could not be restored.');
+    return;
+  }
+  if (item.done && created.data.item) {
+    await sendJson('api/items/' + encodeURIComponent(created.data.item.id), 'PATCH', { done: true });
+  }
+  const listed = await call('api/items');
+  if (listed.ok && Array.isArray(listed.data.items)) items = listed.data.items;
+  renderAll();
+  showToast('Item restored.');
+}
+
+async function deleteItem(item) {
+  const result = await call('api/items/' + encodeURIComponent(item.id), { method: 'DELETE' });
+  if (!result.ok) {
+    showToast(result.data.error || 'That item could not be deleted.');
+    return;
+  }
+  items = items.filter((entry) => String(entry.id) !== String(item.id));
+  renderAll();
+  showToast('Removed “' + item.title + '”.', { label: 'Undo', run: () => restoreItem(item) });
+}
+
+function showToast(message, action) {
+  const toast = $('toast');
+  const button = $('toast-action');
+  $('toast-text').textContent = message;
+  button.hidden = !action;
+  button.onclick = action
+    ? () => {
+        hideToast();
+        action.run();
+      }
+    : null;
+  if (action) button.textContent = action.label;
+
+  clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
+  toast.hidden = false;
+  requestAnimationFrame(() => toast.classList.add('is-visible'));
+  toastTimer = setTimeout(hideToast, action ? 6000 : 3800);
+}
+
+function hideToast() {
+  const toast = $('toast');
+  clearTimeout(toastTimer);
+  toast.classList.remove('is-visible');
+  clearTimeout(toastHideTimer);
+  toastHideTimer = setTimeout(() => {
+    toast.hidden = true;
+  }, 220);
+}
+
+function updateAccount(user) {
+  const email = user ? user.email : 'Not signed in';
+  $('who').textContent = email;
+  $('who').title = email;
+  $('foot-user').textContent = email;
+  $('avatar').textContent = user ? (user.email.charAt(0) || '?').toUpperCase() : '·';
+  $('signout').hidden = !user;
+  $('account').hidden = !user;
+  $('workspace-nav').hidden = !user;
+}
+
+async function enterApp(user) {
+  $('signed-out').hidden = true;
+  $('offline').hidden = true;
+  $('today-label').textContent = formatDate();
+  setError('item-error', '');
+
+  const listed = await call('api/items');
+  if (!listed.ok) {
+    setError('item-error', listed.data.error || 'Could not load your list.');
+    items = [];
+  } else {
+    items = Array.isArray(listed.data.items) ? listed.data.items : [];
+  }
+  updateAccount(user);
+  renderAll();
+  $('signed-in').hidden = false;
+}
+
+function showAuth() {
+  $('signed-in').hidden = true;
+  $('offline').hidden = true;
+  $('signed-out').hidden = false;
+  updateAccount(null);
+  items = [];
+  filter = 'all';
+  updateFilterButtons();
+  renderAll();
+  setError('auth-error', '');
+}
+
+function showOffline() {
+  $('signed-out').hidden = true;
+  $('signed-in').hidden = true;
+  $('offline').hidden = false;
+  updateAccount(null);
+}
+
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll('.auth-tab').forEach((tab) => {
+    const active = tab.dataset.mode === mode;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+
+  const signup = mode === 'signup';
+  $('auth-title').textContent = signup ? 'Make it yours' : 'Welcome back';
+  $('auth-sub').textContent = signup
+    ? "Your account lives in this app's own database."
+    : 'Sign in to pick up where you left off.';
+  $('auth-submit').textContent = signup ? 'Create account' : 'Sign in';
+  $('auth-fine').textContent = signup
+    ? 'No verification email. Your password is hashed before it is stored.'
+    : 'One email and password, and your list is right where you left it.';
+  $('password').setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
+  $('password-hint').hidden = !signup;
+  setError('auth-error', '');
+}
+
+function resolvedTheme() {
+  const chosen = document.documentElement.getAttribute('data-theme');
+  if (chosen === 'light' || chosen === 'dark') return chosen;
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function updateThemeButton() {
+  const theme = resolvedTheme();
+  $('theme-toggle').setAttribute('aria-label', theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+  $('theme-toggle').setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+}
+
+async function boot() {
+  const me = await call('api/me');
+  if (!me.ok) {
+    showOffline();
+    return;
+  }
+  if (me.data.user) {
+    await enterApp(me.data.user);
+  } else {
+    showAuth();
+  }
+}
+
+document.querySelectorAll('.auth-tab').forEach((tab) => {
+  tab.addEventListener('click', () => setMode(tab.dataset.mode));
+  tab.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const next = mode === 'signup' ? 'signin' : 'signup';
+    setMode(next);
+    document.querySelector('.auth-tab[data-mode="' + next + '"]').focus();
+  });
+});
 
 $('auth-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const action = event.submitter && event.submitter.dataset.action === 'signin' ? 'signin' : 'signup';
-  const buttons = Array.from($('auth-form').querySelectorAll('button'));
-
   const email = $('email').value.trim();
   const password = $('password').value;
-  if (!email || password.length < 8) {
-    setError('auth-error', 'Enter an email and a password of at least 8 characters.');
+  const submit = $('auth-submit');
+  const buttons = Array.from($('auth-form').querySelectorAll('button'));
+
+  if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)) {
+    setError('auth-error', 'Enter a valid email address.');
+    $('email').focus();
+    return;
+  }
+  if (mode === 'signup' && password.length < 8) {
+    setError('auth-error', 'Use a password of at least 8 characters.');
+    $('password').focus();
+    return;
+  }
+  if (!password) {
+    setError('auth-error', 'Enter your password.');
+    $('password').focus();
     return;
   }
 
-  buttons.forEach((button) => { button.disabled = true; });
+  buttons.forEach((button) => {
+    button.disabled = true;
+  });
+  submit.textContent = mode === 'signup' ? 'Creating account…' : 'Signing in…';
   setError('auth-error', '');
-  const result = await call('api/' + action, { email, password });
-  buttons.forEach((button) => { button.disabled = false; });
+
+  const result = await sendJson('api/' + mode, 'POST', { email: email, password: password });
+
+  buttons.forEach((button) => {
+    button.disabled = false;
+  });
+  submit.textContent = mode === 'signup' ? 'Create account' : 'Sign in';
 
   if (!result.ok) {
     setError('auth-error', result.data.error || 'That did not work.');
@@ -805,21 +1577,36 @@ $('auth-form').addEventListener('submit', async (event) => {
   }
 
   $('password').value = '';
-  await render();
+  $('show-password').textContent = 'Show';
+  $('show-password').setAttribute('aria-pressed', 'false');
+  $('password').type = 'password';
+  await enterApp(result.data.user);
+});
+
+$('show-password').addEventListener('click', () => {
+  const input = $('password');
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  $('show-password').textContent = showing ? 'Show' : 'Hide';
+  $('show-password').setAttribute('aria-pressed', showing ? 'false' : 'true');
+  input.focus();
 });
 
 $('item-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const title = $('title').value.trim();
+  const input = $('title');
+  const title = input.value.trim();
+  const button = $('add-button');
+
   if (!title) {
-    setError('item-error', 'Give the item a name first.');
+    setError('item-error', 'Give it a name first.');
+    input.focus();
     return;
   }
 
-  const button = $('item-form').querySelector('button');
   button.disabled = true;
   setError('item-error', '');
-  const result = await call('api/items', { title });
+  const result = await sendJson('api/items', 'POST', { title: title });
   button.disabled = false;
 
   if (!result.ok) {
@@ -827,16 +1614,78 @@ $('item-form').addEventListener('submit', async (event) => {
     return;
   }
 
-  $('title').value = '';
-  await render();
+  input.value = '';
+  if (result.data.item) items.unshift(result.data.item);
+  if (filter === 'done') {
+    filter = 'all';
+    updateFilterButtons();
+  }
+  renderAll();
+  input.focus();
+});
+
+document.querySelectorAll('[data-filter]').forEach((button) => {
+  button.addEventListener('click', () => {
+    filter = button.dataset.filter;
+    updateFilterButtons();
+    renderList();
+  });
 });
 
 $('signout').addEventListener('click', async () => {
-  await call('api/signout', {});
-  await render();
+  $('signout').disabled = true;
+  await sendJson('api/signout', 'POST', {});
+  $('signout').disabled = false;
+  hideToast();
+  showAuth();
+  $('email').focus();
 });
 
-render().catch(() => setError('auth-error', 'The app could not start. Reload the page.'));
+$('theme-toggle').addEventListener('click', () => {
+  const next = resolvedTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem('theme', next);
+  } catch (error) {}
+  updateThemeButton();
+});
+
+if (window.matchMedia) {
+  const query = window.matchMedia('(prefers-color-scheme: dark)');
+  if (query.addEventListener) query.addEventListener('change', updateThemeButton);
+}
+
+$('retry').addEventListener('click', () => {
+  document.body.classList.add('is-booting');
+  boot()
+    .catch(showOffline)
+    .finally(() => document.body.classList.remove('is-booting'));
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+  if (typing) {
+    if (event.key === 'Escape') target.blur();
+    return;
+  }
+  if ($('signed-in').hidden) return;
+  if (event.key === 'n' || event.key === 'N') {
+    event.preventDefault();
+    $('title').focus();
+  }
+});
+
+setMode('signup');
+updateAccount(null);
+updateThemeButton();
+
+boot()
+  .catch(showOffline)
+  .finally(() => document.body.classList.remove('is-booting'));
+`,
+    'public/favicon.svg': `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#1e1b16"/><path d="M9 16.5l4.2 4L23 11" fill="none" stroke="#f4f1ea" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
 `,
   };
 }

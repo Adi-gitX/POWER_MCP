@@ -233,7 +233,6 @@
   const demoFrame = $('#demoFrame');
   const demoTabs = $$('.demo-tab');
   const demoSlides = $$('.demo-slide');
-  const demoBgs = $$('.demo-bg-img');
   const demoCaption = $('#demoCaption');
   const demoPrev = $('#demoPrev');
   const demoNext = $('#demoNext');
@@ -267,7 +266,6 @@
       slide.toggleAttribute('inert', !active);
       slide.setAttribute('aria-hidden', String(!active));
     });
-    demoBgs.forEach((bg) => bg.classList.toggle('is-active', bg.dataset.demoBg === name));
     if (demoCaption) demoCaption.textContent = demoCopy[name];
     restartDemoTimer();
   };

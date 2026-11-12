@@ -53,6 +53,14 @@ export interface OAuthDeps {
    * deployment that forgot to configure a mailer.
    */
   devLink?: boolean;
+  /**
+   * Where signing out ends up.
+   *
+   * Not the sign-in form: that asks someone who has just said no to type
+   * their address again. The landing page is a different origin, so this is
+   * configuration rather than a path, and it defaults to the marketing site.
+   */
+  signOutUrl?: string;
 }
 
 /** Paths the Express app owns. Checked by index.ts before its own routing. */
@@ -163,7 +171,7 @@ export function createOAuthApp(deps: OAuthDeps): Express {
     const sid = cookie(req, SESSION_COOKIE);
     if (sid) await store.deleteSession(sha256(sid));
     res.setHeader('set-cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax`);
-    res.redirect(302, '/login');
+    res.redirect(302, deps.signOutUrl ?? signOutDestination(config.issuer));
   });
 
   // ---- consent
@@ -301,6 +309,24 @@ export function newCsrfNonce(): string {
 
 function cookie(req: Request, name: string): string | null {
   return readCookie(req.headers.cookie, name);
+}
+
+/**
+ * Where a signed-out browser lands.
+ *
+ * The landing page is the honest destination: the person has just declined to
+ * be here, and a sign-in form in reply is a dead end that looks like a failed
+ * sign-out. It lives on another origin, so this is an absolute URL.
+ *
+ * Loopback defaults to the site's own development port, because running both
+ * halves locally is the normal case and `pnpm dev:site` serves it there.
+ * Anywhere else it defaults to the public site; POWER_SITE_URL overrides both.
+ */
+export function signOutDestination(baseUrl: string, env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.POWER_SITE_URL?.trim();
+  if (explicit) return `${explicit.replace(/\/+$/, '')}/`;
+  const onLoopback = new Set(['localhost', '127.0.0.1', '::1', '[::1]']).has(new URL(baseUrl).hostname);
+  return onLoopback ? 'http://localhost:4000/' : 'https://usepower.dev/';
 }
 
 /**

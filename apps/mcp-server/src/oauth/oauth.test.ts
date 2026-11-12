@@ -9,6 +9,7 @@ import {
   type OAuthConfig,
 } from './metadata.js';
 import { CLAUDE_CALLBACK, expandRedirectUris, isAllowedRedirectUri, rejectedRedirectUris } from './redirects.js';
+import { signOutDestination } from './routes.js';
 
 const env = (over: Record<string, string> = {}): NodeJS.ProcessEnv => ({
   POWER_ISSUER_URL: 'https://mcp.example.com',
@@ -134,5 +135,27 @@ describe('redirect uris', () => {
     const e = { POWER_EXTRA_REDIRECT_URIS: 'https://inspector.example.com/cb' };
     expect(isAllowedRedirectUri('https://inspector.example.com/cb', e)).toBe(true);
     expect(expandRedirectUris([], e)).toContain('https://inspector.example.com/cb');
+  });
+});
+
+describe('signing out', () => {
+  it('lands on the site, not on the sign-in form', () => {
+    // A person who has just signed out is not asking to sign in again; the
+    // form that answers that redirect reads as a failed sign-out.
+    expect(signOutDestination('https://mcp.example.com', {})).toBe('https://usepower.dev/');
+    expect(signOutDestination('https://mcp.example.com', {})).not.toContain('/login');
+  });
+
+  it('points at the local site while running on loopback', () => {
+    expect(signOutDestination('http://localhost:4321', {})).toBe('http://localhost:4000/');
+    expect(signOutDestination('http://127.0.0.1:4321', {})).toBe('http://localhost:4000/');
+  });
+
+  it('takes an operator override, with or without a trailing slash', () => {
+    const env = { POWER_SITE_URL: 'https://example.org' };
+    expect(signOutDestination('http://localhost:4321', env)).toBe('https://example.org/');
+    expect(signOutDestination('http://localhost:4321', { POWER_SITE_URL: 'https://example.org/' })).toBe(
+      'https://example.org/',
+    );
   });
 });

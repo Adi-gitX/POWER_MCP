@@ -19,14 +19,14 @@ Nothing to sign up for. Works offline.
 
 ```sh
 pnpm install
-pnpm check          # typecheck + 168 unit tests
+pnpm check          # typecheck + 288 unit tests
 pnpm dev            # MCP on http://localhost:4321/mcp
 ```
 
 In a second terminal, prove the whole pipeline runs:
 
 ```sh
-pnpm e2e            # 74 steps through a real MCP client
+pnpm e2e            # 93 steps through a real MCP client
 ```
 
 **It worked if** `pnpm e2e` ends with `ALL PASSED`.

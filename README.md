@@ -47,7 +47,7 @@ Requires Node 22 or newer and pnpm 10.
 
 ```sh
 pnpm install
-pnpm check        # typecheck + 285 unit tests
+pnpm check        # typecheck + 288 unit tests
 pnpm dev          # MCP at http://localhost:4321/mcp, browser companion at http://localhost:4321/
 ```
 
@@ -89,7 +89,7 @@ The conversation can ask for any of these. It cannot answer them.
 Two ways to watch the whole pipeline without typing anything.
 
 ```sh
-# 1. A real MCP client walks all 74 gate checks, deterministically.
+# 1. A real MCP client walks all 93 gate checks, deterministically.
 #    NOTE: this talks to a running server — start `pnpm dev` in another shell first.
 pnpm dev &
 pnpm e2e
@@ -357,11 +357,11 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 
 | What | Command | Result |
 |---|---|---|
-| Unit tests | `pnpm check` | 285 tests across 17 files, plus typecheck. Three need `POWER_TEST_DATABASE_URL` and are skipped without it |
-| End to end | `pnpm dev` then `pnpm e2e` | 74 steps through a real MCP client |
+| Unit tests | `pnpm check` | 288 tests across 17 files, plus typecheck. Three need `POWER_TEST_DATABASE_URL` and are skipped without it |
+| End to end | `pnpm dev` then `pnpm e2e` | 93 steps through a real MCP client |
 | A real model | `scripts/eval-claude.sh` | a live Claude session, transcripts committed |
 
-**Unit** (285): gates, run state, guard, migration gate, jobs, metering, secrets, the project dashboard (search, filters, settings, rename), browser sessions and sign-in redirects, both database drivers (including the app's own `pg` connection and real per-branch databases), OAuth, CSRF, and RLS.
+**Unit** (288): gates, run state, guard, migration gate, jobs, metering, secrets, the project dashboard (search, filters, settings, rename), browser sessions and sign-in redirects, both database drivers (including the app's own `pg` connection and real per-branch databases), OAuth, CSRF, and RLS.
 
 **End to end:** every phase gate, both human approvals, the migration gate and its typed confirmation, a leaked secret caught by the scrubber, **a person signing up inside the generated app and writing a row Power can read**, publishing with env injected, a downloadable git bundle, billing on the envelope, and a second run started on the shipped project with the gates re-armed. It drives a real MCP client over HTTP, so **the server must already be running** — `pnpm e2e` on its own fails with `ECONNREFUSED` on port 4321. It is repeatable: the metering step measures what that run spent rather than asserting an absolute quota, so consecutive runs against one server all pass.
 
@@ -378,6 +378,7 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 | `POWER_LOCAL_ROOT` | a local data directory | Where sandboxes and the control plane live |
 | `POWER_ISSUER_URL` | `POWER_BASE_URL` | The OAuth issuer and the origin every discovery document points at |
 | `POWER_MCP_URL` | `<issuer>/mcp` | Must equal the URL a person types into their client, byte for byte |
+| `POWER_SITE_URL` | `http://localhost:4000` on loopback, else `https://usepower.dev` | Where signing out lands. The landing page is a different origin, so this is an absolute URL |
 | `POWER_SECRET_KEY` | required off loopback | 32 bytes, base64. Secrets are encrypted at rest and there is no safe default |
 | `POWER_DEPLOYER` | unset | `local` writes releases to disk and serves them; otherwise deploys to the user's hosting account |
 | `POWER_PROJECT_DATABASE_URL` | unset | Unset, project branches are PGlite on disk, served over a socket. Set, the same driver runs on real Postgres with one database per branch |
@@ -386,7 +387,7 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 | `POWER_TOKENS` | unset | `tok:alice:pro,tok:bob:free` adds static bearer tokens alongside OAuth |
 | `REDIS_URL` | unset | Moves quota accounting from memory to Redis |
 | `STRIPE_SECRET_KEY` | unset | Billing integration |
-| `SITE_URL` | `https://power.build` | Canonical origin for the built site |
+| `SITE_URL` | `https://usepower.dev` | Canonical origin for the built site |
 
 ---
 
