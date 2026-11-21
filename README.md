@@ -360,6 +360,7 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 | Unit tests | `pnpm check` | 288 tests across 17 files, plus typecheck. Three need `POWER_TEST_DATABASE_URL` and are skipped without it |
 | End to end | `pnpm dev` then `pnpm e2e` | 93 steps through a real MCP client |
 | A real model | `scripts/eval-claude.sh` | a live Claude session, transcripts committed |
+| Visual pass | Both dev servers, then `pnpm visual` | 12 screenshots in `screenshots/` at 1440 and 390, including a signed-in dashboard |
 
 **Unit** (288): gates, run state, guard, migration gate, jobs, metering, secrets, the project dashboard (search, filters, settings, rename), browser sessions and sign-in redirects, both database drivers (including the app's own `pg` connection and real per-branch databases), OAuth, CSRF, and RLS.
 

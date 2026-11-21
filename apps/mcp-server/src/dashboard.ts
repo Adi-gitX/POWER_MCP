@@ -120,8 +120,8 @@ function shell(ctx: PageContext, title: string, body: string, active?: 'projects
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#f4f1ea">
 <meta name="robots" content="noindex">
 <title>${esc(title)} · Power</title>
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
@@ -983,6 +983,6 @@ export function renderMessagePage(title: string, message: string): string {
 // ---------------------------------------------------------------------- css
 
 /** The brand mark, in the one place a browser can fetch it. */
-export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 709 741"><path d="${MARK_PATH}" fill="#fff3f0"/></svg>`;
+export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 709 741"><path d="${MARK_PATH}" fill="#0b0c0e"/></svg>`;
 
 export { DASHBOARD_CSS } from './app-css.js';

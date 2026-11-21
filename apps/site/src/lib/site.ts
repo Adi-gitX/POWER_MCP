@@ -33,21 +33,11 @@ export const SITE = {
   app: APP_URL.replace(/\/+$/, ''),
 } as const;
 
-export const signIn = `${SITE.app}/login`;
-
-export const signUp = `${SITE.app}/login?next=/`;
-
 /**
- * Required by Anthropic's connector directory, and until now written and
- * unreachable: both pages existed with nothing linking to them.
+ * The account screen lives on the marketing site (it needs the brand, the
+ * three-step rail and the art), and posts to the server's real /login route.
+ * Keeping these relative also means the link survives a preview domain.
  */
-export const LEGAL = [
-  { href: '/privacy/', label: 'Privacy' },
-  { href: '/terms/', label: 'Terms' },
-] as const;
+export const signIn = '/login';
 
-export const NAV = [
-  { href: '/proof/', label: 'Proof' },
-  { href: '/docs/', label: 'Docs' },
-  { href: '/pricing/', label: 'Pricing' },
-] as const;
+export const signUp = '/login';

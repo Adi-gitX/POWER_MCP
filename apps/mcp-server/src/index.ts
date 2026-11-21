@@ -475,7 +475,7 @@ function hostOf(req: IncomingMessage): string {
 
 /** Read once at boot: two files, 63 KB, and every page needs them. */
 const FONTS = new Map<string, Buffer>(
-  ['inter-latin.woff2', 'fragment-mono-latin.woff2'].flatMap((name) => {
+  ['inter-latin.woff2', 'fragment-mono-latin.woff2', 'instrument-serif.woff2', 'instrument-serif-italic.woff2'].flatMap((name) => {
     try {
       return [[`/assets/fonts/${name}`, readFileSync(new URL(`../assets/fonts/${name}`, import.meta.url))] as const];
     } catch {

@@ -22,10 +22,10 @@ export const metadata: Metadata = {
       'Build full-stack apps with the AI you already use. Every step is checked by real code, and two decisions stay yours.',
     images: [
       {
-        url: '/assets/img/hero-bg.jpg',
-        width: 1600,
-        height: 1000,
-        alt: 'Power — one connection for your AI’s tools, skills and context.',
+        url: '/assets/img/art/hero-warrior.jpg',
+        width: 2000,
+        height: 1039,
+        alt: 'A marble statue against a bright blue sky — Power, ship it checked.',
       },
     ],
   },
@@ -34,12 +34,12 @@ export const metadata: Metadata = {
     title: 'Power — ship it checked',
     description:
       'Build full-stack apps with the AI you already use. Every step is checked by real code, and two decisions stay yours.',
-    images: ['/assets/img/hero-bg.jpg'],
+    images: ['/assets/img/art/hero-warrior.jpg'],
   },
   icons: { icon: '/assets/img/power-mark.svg' },
 };
 
-export const viewport: Viewport = { themeColor: '#000000' };
+export const viewport: Viewport = { themeColor: '#f4f1ea' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -55,6 +55,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           type="font/woff2"
           crossOrigin=""
         />
+        <link
+          rel="preload"
+          href="/assets/fonts/instrument-serif.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin=""
+        />
+
       </head>
       <body>
         <SmoothScroll />

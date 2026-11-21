@@ -16,7 +16,7 @@ export function SiteClosing() {
   return (
     <section className="closing" aria-labelledby="closing-title">
       <div className="closing-art" aria-hidden="true">
-        <img src="/assets/img/dunes.webp" alt="" loading="lazy" />
+        <img src="/assets/img/art/sky-clouds.jpg" alt="" loading="lazy" />
       </div>
       <div className="shell closing-inner">
         <span className="eyebrow reveal">

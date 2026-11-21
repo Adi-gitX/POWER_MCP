@@ -1,0 +1,73 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "power-app",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev"
+      ],
+      "port": 4321
+    },
+    {
+      "name": "power-site",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev:site"
+      ],
+      "port": 4000
+    },
+    {
+      "name": "dl-app",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "POWER_VERCEL_API_URL=http://127.0.0.1:4500",
+        "POWER_VERCEL_WEB_URL=http://127.0.0.1:4500",
+        "POWER_VERCEL_CLIENT_ID=oac_mock",
+        "POWER_VERCEL_CLIENT_SECRET=mock_secret",
+        "POWER_VERCEL_INTEGRATION_SLUG=power",
+        "pnpm",
+        "--dir",
+        "/Users/kammatiaditya/Downloads/POWER_MCP-main",
+        "dev"
+      ],
+      "port": 4321
+    },
+    {
+      "name": "dl-site",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "/Users/kammatiaditya/Downloads/POWER_MCP-main",
+        "dev:site"
+      ],
+      "port": 4000
+    },
+    {
+      "name": "stargate",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "STARGATE_LOCAL_FIXTURES=true",
+        "npx",
+        "--prefix",
+        "/private/tmp/claude-501/-Users-kammatiaditya-power-mcp/3a946c62-880b-431f-830c-9038fad167f7/scratchpad/stargate-web",
+        "next",
+        "dev",
+        "/private/tmp/claude-501/-Users-kammatiaditya-power-mcp/3a946c62-880b-431f-830c-9038fad167f7/scratchpad/stargate-web",
+        "-p",
+        "3100"
+      ],
+      "port": 3100
+    },
+    {
+      "name": "dl-app-vercel",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "/Users/kammatiaditya/Downloads/POWER_MCP-main",
+        "dev:vercel"
+      ],
+      "port": 4321
+    }
+  ]
+}

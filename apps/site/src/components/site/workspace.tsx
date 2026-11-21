@@ -82,6 +82,13 @@ export function Workspace() {
     if (window.innerWidth < 900) setRightOpen(false);
   }, []);
 
+  /* A prompt typed on the marketing page arrives as ?idea=… — start the
+     person at the composer with their own words already in it. */
+  useEffect(() => {
+    const incoming = new URLSearchParams(window.location.search).get('idea');
+    if (incoming) setIdea(incoming.slice(0, 240));
+  }, []);
+
   /* Cycle the composer placeholder until the first session exists. */
   useEffect(() => {
     if (sessions.length > 0) return;
@@ -151,14 +158,14 @@ export function Workspace() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex overflow-hidden bg-paper text-ink">
+    <div className="bench fixed inset-0 z-50 flex overflow-hidden bg-paper text-ink">
       {/* wallpaper stage */}
       <div aria-hidden className="absolute inset-0">
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: 'url(/assets/img/hero-bg.jpg)' }}
+          style={{ backgroundImage: 'url(/assets/img/art/sky-clouds.jpg)' }}
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/72 via-black/58 to-black/82" />
+        <div className="absolute inset-0 bg-gradient-to-b from-paper/95 via-paper/85 to-paper/92" />
       </div>
 
       {/* icon rail */}
@@ -171,13 +178,13 @@ export function Workspace() {
             aria-current={on ? 'page' : undefined}
             className={cn(
               'flex size-11 items-center justify-center rounded-2xl transition-colors',
-              on ? 'bg-white/12 text-bright' : 'text-bright/55 hover:bg-white/8 hover:text-bright',
+              on ? 'bg-ink/10 text-ink' : 'text-ink-2 hover:bg-ink/8 hover:text-ink',
             )}
           >
             <Icon className="size-5" strokeWidth={1.8} />
           </Link>
         ))}
-        <div className="mt-auto flex size-9 items-center justify-center rounded-full bg-white/12 text-[0.72rem] font-bold text-bright">
+        <div className="mt-auto flex size-9 items-center justify-center rounded-full bg-ink/10 text-[0.72rem] font-bold text-ink">
           A
         </div>
       </nav>
@@ -185,16 +192,16 @@ export function Workspace() {
       {/* sessions sidebar */}
       <aside
         className={cn(
-          'relative z-10 flex shrink-0 flex-col border-r border-white/8 bg-black/25 backdrop-blur-xl transition-[width,opacity] duration-300 max-md:absolute max-md:z-20 max-md:h-full max-md:shadow-2xl',
+          'relative z-10 flex shrink-0 flex-col border-r border-line bg-white/70 backdrop-blur-xl transition-[width,opacity] duration-300 max-md:absolute max-md:z-20 max-md:h-full max-md:shadow-2xl',
           sidebarOpen ? 'w-72 opacity-100' : 'w-0 overflow-hidden opacity-0',
         )}
       >
         <div className="flex items-center justify-between px-5 pb-3 pt-5">
-          <Link href="/" className="flex items-center gap-2.5 text-[1.2rem] font-medium tracking-tight text-bright">
+          <Link href="/" className="flex items-center gap-2.5 text-[1.2rem] font-medium tracking-tight text-ink">
             <img src="/assets/img/power-mark.svg" alt="" width={22} height={23} />
             {SITE.name}
           </Link>
-          <span className="rounded-full bg-accent/90 px-2 py-0.5 text-[0.68rem] font-bold text-accent-ink">
+          <span className="rounded-full bg-accent px-2 py-0.5 text-[0.68rem] font-bold text-accent-ink">
             bench
           </span>
         </div>
@@ -206,11 +213,11 @@ export function Workspace() {
         </div>
 
         <div className="mt-6 px-5">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-bright/45">Sessions</p>
+          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink/60">Sessions</p>
         </div>
         <div className="mt-1.5 max-h-64 space-y-0.5 overflow-y-auto px-3">
           {sessions.length === 0 && (
-            <p className="px-3 py-2 text-[0.86rem] text-bright/50">
+            <p className="px-3 py-2 text-[0.86rem] text-ink/65">
               Nothing running yet. Describe a build below and watch the gates work.
             </p>
           )}
@@ -220,7 +227,7 @@ export function Workspace() {
               onClick={() => setActiveId(s.id)}
               className={cn(
                 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[0.92rem] transition-colors',
-                s.id === activeId ? 'bg-white/12 text-bright' : 'text-bright/75 hover:bg-white/8 hover:text-bright',
+                s.id === activeId ? 'bg-ink/10 text-ink' : 'text-ink/75 hover:bg-ink/8 hover:text-ink',
               )}
             >
               <SquarePen className="size-4.5 shrink-0" strokeWidth={1.8} />
@@ -230,8 +237,8 @@ export function Workspace() {
           ))}
         </div>
 
-        <div className="mt-auto border-t border-white/8 px-5 py-4">
-          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-bright/45">Power</p>
+        <div className="mt-auto border-t border-line px-5 py-4">
+          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-ink/60">Power</p>
           <div className="mt-2.5 space-y-0.5">
             <SidebarRow icon={BookOpen} label="How gates work" href="/docs/" />
             <SidebarRow icon={SquareTerminal} label="Connect your AI" href="/docs/getting-started/" />
@@ -247,36 +254,36 @@ export function Workspace() {
           <button
             aria-label="Toggle sessions"
             onClick={() => setSidebarOpen((v) => !v)}
-            className="rounded-lg p-2 text-bright/60 transition-colors hover:bg-white/8 hover:text-bright"
+            className="rounded-lg p-2 text-ink/60 transition-colors hover:bg-ink/8 hover:text-ink"
           >
             <PanelLeft className="size-4.5" />
           </button>
           <button
             aria-label="Toggle panels"
             onClick={() => setRightOpen((v) => !v)}
-            className="rounded-lg p-2 text-bright/60 transition-colors hover:bg-white/8 hover:text-bright"
+            className="rounded-lg p-2 text-ink/60 transition-colors hover:bg-ink/8 hover:text-ink"
           >
             <PanelRight className="size-4.5" />
           </button>
-          <div className="flex h-9 min-w-0 max-w-64 items-center gap-2 overflow-hidden rounded-xl border border-white/10 bg-black/30 px-3.5 text-[0.86rem] text-bright/90 backdrop-blur-md">
+          <div className="flex h-9 min-w-0 max-w-64 items-center gap-2 overflow-hidden rounded-xl border border-line bg-white/75 px-3.5 text-[0.86rem] text-ink/90 backdrop-blur-md">
             <span className="truncate">{active ? active.title : 'New session'}</span>
             {active && (
               <button aria-label="Close session view" onClick={newSession} className="shrink-0">
-                <X className="size-3.5 text-bright/40 hover:text-bright" />
+                <X className="size-3.5 text-ink/40 hover:text-ink" />
               </button>
             )}
           </div>
           <div className="ml-auto flex items-center gap-2">
             {notice && (
-              <span className="hidden h-9 items-center rounded-xl border border-white/10 bg-black/30 px-3.5 text-[0.8rem] text-bright/70 backdrop-blur-md md:flex">
+              <span className="hidden h-9 items-center rounded-xl border border-line bg-white/75 px-3.5 text-[0.8rem] text-ink/70 backdrop-blur-md md:flex">
                 Gates check every step before you see it.
-                <Link href="/docs/" className="ml-1.5 text-bright underline underline-offset-2">How</Link>
+                <Link href="/docs/" className="ml-1.5 text-ink underline underline-offset-2">How</Link>
                 <button aria-label="Dismiss" onClick={() => setNotice(false)} className="ml-2">
-                  <X className="size-3.5 text-bright/40 hover:text-bright" />
+                  <X className="size-3.5 text-ink/40 hover:text-ink" />
                 </button>
               </span>
             )}
-            <button aria-label="New session" onClick={newSession} className="rounded-lg p-2 text-bright/60 hover:bg-white/8 hover:text-bright">
+            <button aria-label="New session" onClick={newSession} className="rounded-lg p-2 text-ink/60 hover:bg-ink/8 hover:text-ink">
               <Plus className="size-4.5" />
             </button>
           </div>
@@ -292,7 +299,7 @@ export function Workspace() {
               height={167}
               className="mb-8 h-40 w-auto opacity-[0.09]"
             />
-            <p className="mb-6 max-w-md text-center text-[0.95rem] text-bright/60">
+            <p className="mb-6 max-w-md rounded-2xl bg-paper/80 px-5 py-3.5 text-center text-[0.95rem] text-ink/90 backdrop-blur-md">
               Describe what to build. The bench plans it, gates each step, and hands you a verification
               receipt — nothing ships unchecked.
             </p>
@@ -309,9 +316,9 @@ export function Workspace() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col px-6 pb-4">
-            <div ref={threadRef} className="mono min-h-0 flex-1 space-y-1.5 overflow-y-auto py-4 text-[0.8rem] text-white/70">
-              <p className="mb-3 rounded-xl border border-white/10 bg-black/35 px-4 py-3 font-sans text-[0.95rem] text-bright backdrop-blur-md">
-                <span className="text-bright/50">Build: </span>{active.idea}
+            <div ref={threadRef} className="mono min-h-0 flex-1 space-y-1.5 overflow-y-auto py-4 text-[0.8rem] text-ink-2">
+              <p className="mb-3 rounded-xl border border-line bg-white/80 px-4 py-3 font-sans text-[0.95rem] text-ink backdrop-blur-md">
+                <span className="text-ink/50">Build: </span>{active.idea}
               </p>
               <AnimatePresence initial={false}>
                 {active.shown.map((s, i) => (
@@ -332,14 +339,14 @@ export function Workspace() {
                   className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/10 p-3"
                 >
                   <span className="font-sans">
-                    <b className="block text-[0.95rem] font-semibold text-white">{active.waiting.title}</b>
-                    <span className="text-[0.82rem] text-white/60">{active.waiting.sub}</span>
+                    <b className="block text-[0.95rem] font-semibold text-ink">{active.waiting.title}</b>
+                    <span className="text-[0.82rem] text-ink-2">{active.waiting.sub}</span>
                   </span>
                   <Button onClick={approve} size="sm" className="rounded-lg">{active.waiting.label}</Button>
                 </motion.div>
               )}
               {active.done && (
-                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-2 text-[0.74rem] text-white/40">
+                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-2 text-[0.74rem] text-ink-3">
                   Run complete. This is the bench narrating the pipeline — connect your AI and the same
                   gates run for real.
                 </motion.p>
@@ -365,7 +372,7 @@ export function Workspace() {
       {/* right rail */}
       <aside
         className={cn(
-          'relative z-10 flex shrink-0 flex-col border-l border-white/8 bg-black/25 backdrop-blur-xl transition-[width,opacity] duration-300 max-md:absolute max-md:right-0 max-md:z-20 max-md:h-full max-md:shadow-2xl',
+          'relative z-10 flex shrink-0 flex-col border-l border-line bg-white/70 backdrop-blur-xl transition-[width,opacity] duration-300 max-md:absolute max-md:right-0 max-md:z-20 max-md:h-full max-md:shadow-2xl',
           rightOpen ? 'w-64 opacity-100' : 'w-0 overflow-hidden opacity-0',
         )}
       >
@@ -376,7 +383,7 @@ export function Workspace() {
               onClick={() => setPanel(id)}
               className={cn(
                 'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[0.8rem] transition-colors',
-                panel === id ? 'bg-white/12 text-bright' : 'text-bright/55 hover:bg-white/8 hover:text-bright',
+                panel === id ? 'bg-ink/10 text-ink' : 'text-ink-2 hover:bg-ink/8 hover:text-ink',
               )}
             >
               <Icon className="size-3.5" strokeWidth={2} />
@@ -395,7 +402,7 @@ export function Workspace() {
             <RailVerify session={active} />
           )}
         </div>
-        <div className="hidden gap-1 border-t border-white/8 p-3 lg:flex">
+        <div className="hidden gap-1 border-t border-line p-3 lg:flex">
           {[
             { icon: Globe, label: 'Preview' },
             { icon: FolderClosed, label: 'Project' },
@@ -404,7 +411,7 @@ export function Workspace() {
           ].map(({ icon: Icon, label }) => (
             <span
               key={label}
-              className="flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[0.68rem] text-bright/45"
+              className="flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[0.68rem] text-ink/60"
             >
               <Icon className="size-4" strokeWidth={1.8} />
               {label}
@@ -430,7 +437,7 @@ function Composer({
   compact?: boolean;
 }) {
   return (
-    <div className="w-full rounded-2xl border border-white/12 bg-black/45 p-3 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.8)] backdrop-blur-xl">
+    <div className="w-full rounded-2xl border border-line-2 bg-white/85 p-3 shadow-[0_24px_60px_-30px_rgba(11,12,14,0.35)] backdrop-blur-xl">
       <textarea
         value={idea}
         onChange={(e) => setIdea(e.target.value)}
@@ -440,7 +447,7 @@ function Composer({
         rows={compact ? 2 : 3}
         placeholder={`Ask ${SITE.name}… Use / for commands — e.g. ${placeholder}`}
         aria-label="Describe what to build"
-        className="w-full resize-none bg-transparent px-2 py-1.5 text-[1rem] text-bright outline-none placeholder:text-bright/45"
+        className="w-full resize-none bg-transparent px-2 py-1.5 text-[1rem] text-ink outline-none placeholder:text-ink/60"
       />
       <div className="mt-1 flex items-center justify-between">
         <div className="relative">
@@ -448,13 +455,13 @@ function Composer({
             onClick={() => setModeOpen((v) => !v)}
             aria-haspopup="listbox"
             aria-expanded={modeOpen}
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[0.88rem] text-bright/75 transition-colors hover:bg-white/8 hover:text-bright"
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[0.88rem] text-ink/75 transition-colors hover:bg-ink/8 hover:text-ink"
           >
             {mode.name}
-            <ChevronDown className="size-3.5 text-bright/50" />
+            <ChevronDown className="size-3.5 text-ink/50" />
           </button>
           {modeOpen && (
-            <div role="listbox" className="absolute bottom-11 left-0 w-60 overflow-hidden rounded-xl border border-white/12 bg-[#1d1d19]/95 shadow-2xl backdrop-blur-xl">
+            <div role="listbox" className="absolute bottom-11 left-0 w-60 overflow-hidden rounded-xl border border-line-2 bg-surface/95 shadow-2xl backdrop-blur-xl">
               {MODES.map((m) => (
                 <button
                   key={m.name}
@@ -462,19 +469,19 @@ function Composer({
                   aria-selected={m.name === mode.name}
                   onClick={() => { setMode(m); setModeOpen(false); }}
                   className={cn(
-                    'block w-full px-4 py-2.5 text-left transition-colors hover:bg-white/8',
-                    m.name === mode.name ? 'text-accent' : 'text-bright/75',
+                    'block w-full px-4 py-2.5 text-left transition-colors hover:bg-ink/8',
+                    m.name === mode.name ? 'text-accent' : 'text-ink/75',
                   )}
                 >
                   <span className="block text-[0.88rem]">{m.name}</span>
-                  <span className="block text-[0.72rem] text-bright/45">{m.hint}</span>
+                  <span className="block text-[0.72rem] text-ink/60">{m.hint}</span>
                 </button>
               ))}
             </div>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="mono hidden text-[0.68rem] text-bright/35 sm:block">⏎ send · ⇧⏎ newline</span>
+          <span className="mono hidden text-[0.68rem] text-ink/55 sm:block">⏎ send · ⇧⏎ newline</span>
           <Button size="sm" className="rounded-lg px-4" aria-label="Start the build" onClick={send}>
             Build <ArrowUp className="size-4" />
           </Button>
@@ -486,26 +493,26 @@ function Composer({
 
 function StepLine({ step }: { step: Step }) {
   if (step.kind === 'say') {
-    return <p className="py-1 pl-7 font-sans text-[0.88rem] text-white/55 before:-ml-5 before:mr-2 before:text-white/25 before:content-['›']">{step.text}</p>;
+    return <p className="py-1 pl-7 font-sans text-[0.88rem] text-ink-2 before:-ml-5 before:mr-2 before:text-ink-3 before:content-['›']">{step.text}</p>;
   }
   if (step.kind === 'call') {
     const ok = step.state === 'ok';
     return (
       <div className={cn('grid grid-cols-[1.1rem_minmax(0,1fr)_auto] items-baseline gap-x-2.5 rounded-lg px-2 py-1.5', !ok && 'border border-dashed border-refuse/40')}>
-        {ok ? <CircleCheck className="size-3.5 self-center text-[#6ee7a8]" /> : <CircleX className="size-3.5 self-center text-[#fca5a5]" />}
-        <span className="break-words text-white">
-          {step.tool}{step.args && <span className="ml-2 text-white/35">{step.args}</span>}
+        {ok ? <CircleCheck className="size-3.5 self-center text-pass" /> : <CircleX className="size-3.5 self-center text-refuse" />}
+        <span className="break-words text-ink">
+          {step.tool}{step.args && <span className="ml-2 text-ink-3">{step.args}</span>}
         </span>
-        <span className={cn('text-[0.72rem]', ok ? 'text-[#6ee7a8]' : 'text-[#fca5a5]')}>{step.status}</span>
+        <span className={cn('text-[0.72rem]', ok ? 'text-pass' : 'text-refuse')}>{step.status}</span>
       </div>
     );
   }
   if (step.kind === 'gate') {
     return (
-      <div className="ml-7 rounded-r-lg border border-l-2 border-[#fca5a5]/30 border-l-[#fca5a5] bg-[#fca5a5]/5 px-3 py-2 font-sans">
-        <b className="font-semibold text-[#fecaca]">{step.rule}</b>
-        <span className="text-[0.85rem] text-white/55"> — {step.text}</span>
-        <small className="mono mt-1 block text-[0.7rem] text-white/35">{step.foot}</small>
+      <div className="ml-7 rounded-r-lg border border-l-2 border-refuse/30 border-l-refuse bg-refuse/5 px-3 py-2 font-sans">
+        <b className="font-semibold text-refuse">{step.rule}</b>
+        <span className="text-[0.85rem] text-ink-2"> — {step.text}</span>
+        <small className="mono mt-1 block text-[0.7rem] text-ink-3">{step.foot}</small>
       </div>
     );
   }
@@ -513,8 +520,8 @@ function StepLine({ step }: { step: Step }) {
     return (
       <div className="ml-7 grid gap-1">
         {step.items.map((f) => (
-          <div key={f} className="flex items-baseline gap-2.5 text-white/60">
-            <span className="text-[#6ee7a8]">✓</span><span>write_file</span><span className="text-white/35">{f}</span>
+          <div key={f} className="flex items-baseline gap-2.5 text-ink-2">
+            <span className="text-pass">✓</span><span>write_file</span><span className="text-ink-3">{f}</span>
           </div>
         ))}
       </div>
@@ -529,7 +536,7 @@ function StepLine({ step }: { step: Step }) {
             initial={{ opacity: 0, scale: 0.4 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: i * 0.05 }}
-            className="size-2.5 rounded-full bg-[#6ee7a8]"
+            className="size-2.5 rounded-full bg-pass"
           />
         ))}
       </div>
@@ -537,9 +544,9 @@ function StepLine({ step }: { step: Step }) {
   }
   if (step.kind === 'receipt') {
     return (
-      <div className="mt-2 rounded-xl border border-[#6ee7a8]/30 bg-[#6ee7a8]/5 p-3 font-sans">
-        <b className="text-[0.95rem] font-semibold text-white">Verification receipt · v1 live</b>
-        <p className="mt-1 text-[0.82rem] text-white/55">13 build actions · 1 refusal (unbilled) · git tag v1 · rollback ready</p>
+      <div className="mt-2 rounded-xl border border-pass/30 bg-pass/5 p-3 font-sans">
+        <b className="text-[0.95rem] font-semibold text-ink">Verification receipt · v1 live</b>
+        <p className="mt-1 text-[0.82rem] text-ink-2">13 build actions · 1 refusal (unbilled) · git tag v1 · rollback ready</p>
       </div>
     );
   }
@@ -549,9 +556,9 @@ function StepLine({ step }: { step: Step }) {
 function RailEmpty() {
   return (
     <div className="pt-8 text-center">
-      <Search className="mx-auto size-6 text-bright/25" />
-      <p className="mt-3 text-[0.85rem] text-bright/55">Start a session and this rail fills with its run log, files, and verification state.</p>
-      <p className="mono mt-2 text-[0.7rem] text-bright/35">run · files · verify</p>
+      <Search className="mx-auto size-6 text-ink/40" />
+      <p className="mt-3 text-[0.85rem] text-ink/70">Start a session and this rail fills with its run log, files, and verification state.</p>
+      <p className="mono mt-2 text-[0.7rem] text-ink/55">run · files · verify</p>
     </div>
   );
 }
@@ -559,18 +566,18 @@ function RailEmpty() {
 function RailRun({ session }: { session: Session }) {
   const calls = session.shown.filter((s) => s.kind === 'call');
   if (calls.length === 0) {
-    return <p className="pt-8 text-center text-[0.85rem] text-bright/55">Planning… tool calls land here as they run.</p>;
+    return <p className="pt-8 text-center text-[0.85rem] text-ink/70">Planning… tool calls land here as they run.</p>;
   }
   return (
     <ul className="mono space-y-1 pt-2 text-[0.74rem]">
       {calls.map((s, i) => (
         s.kind === 'call' && (
-          <li key={i} className="flex items-center gap-2 rounded-lg bg-white/[0.04] px-2.5 py-1.5">
-            <span className={s.state === 'ok' ? 'text-[#6ee7a8]' : 'text-[#fca5a5]'}>
+          <li key={i} className="flex items-center gap-2 rounded-lg bg-ink/[0.04] px-2.5 py-1.5">
+            <span className={s.state === 'ok' ? 'text-pass' : 'text-refuse'}>
               {s.state === 'ok' ? '✓' : '×'}
             </span>
-            <span className="min-w-0 flex-1 truncate text-white/75">{s.tool}</span>
-            <span className={s.state === 'ok' ? 'text-white/35' : 'text-[#fca5a5]/80'}>
+            <span className="min-w-0 flex-1 truncate text-ink/75">{s.tool}</span>
+            <span className={s.state === 'ok' ? 'text-ink-3' : 'text-refuse/80'}>
               {s.state === 'ok' ? 'ok' : 'held'}
             </span>
           </li>
@@ -583,12 +590,12 @@ function RailRun({ session }: { session: Session }) {
 function RailFiles({ session }: { session: Session }) {
   const files = session.shown.flatMap((s) => (s.kind === 'files' ? s.items : []));
   if (files.length === 0) {
-    return <p className="pt-8 text-center text-[0.85rem] text-bright/55">No files yet — they appear here the moment the bench writes them.</p>;
+    return <p className="pt-8 text-center text-[0.85rem] text-ink/70">No files yet — they appear here the moment the bench writes them.</p>;
   }
   return (
     <ul className="mono space-y-1 pt-2 text-[0.78rem]">
       {files.map((f) => (
-        <li key={f} className="flex items-center gap-2.5 rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-white/75">
+        <li key={f} className="flex items-center gap-2.5 rounded-lg bg-ink/[0.04] px-2.5 py-1.5 text-ink/75">
           <FileCode2 className="size-3.5 shrink-0 text-accent" />
           <span className="min-w-0 flex-1 truncate">{f}</span>
         </li>
@@ -612,13 +619,13 @@ function RailVerify({ session }: { session: Session }) {
     <div className="pt-2">
       <ul className="space-y-1">
         {rows.map(([k, v]) => (
-          <li key={k} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2 text-[0.82rem]">
-            <span className="text-bright/60">{k}</span>
-            <span className={cn('font-semibold', receipt && k === 'Receipt' ? 'text-accent' : 'text-bright')}>{v}</span>
+          <li key={k} className="flex items-center justify-between rounded-lg bg-ink/[0.04] px-3 py-2 text-[0.82rem]">
+            <span className="text-ink/60">{k}</span>
+            <span className={cn('font-semibold', receipt && k === 'Receipt' ? 'text-accent' : 'text-ink')}>{v}</span>
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-[0.76rem] leading-relaxed text-bright/45">
+      <p className="mt-3 text-[0.76rem] leading-relaxed text-ink/45">
         Verification re-exercises every requirement by interaction — it never just re-reads the code.
       </p>
       {!session.done && (
@@ -644,14 +651,14 @@ function SidebarRow({
       <Icon className="size-4.5 shrink-0" strokeWidth={1.8} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {badge && (
-        <span className="rounded-full bg-accent/90 px-2 py-0.5 text-[0.68rem] font-bold text-accent-ink">
+        <span className="rounded-full bg-accent px-2 py-0.5 text-[0.68rem] font-bold text-accent-ink">
           {badge}
         </span>
       )}
     </>
   );
   const cls =
-    'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.92rem] text-bright/75 transition-colors hover:bg-white/8 hover:text-bright';
+    'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[0.92rem] text-ink/75 transition-colors hover:bg-ink/8 hover:text-ink';
   if (href) return <Link href={href} className={cls}>{inner}</Link>;
   return <button onClick={onClick} className={cls}>{inner}</button>;
 }
