@@ -9,9 +9,9 @@
 # then fails the first time anyone asks to see their app.
 #
 # It installs with `--filter @power/mcp-server...`, so the marketing site and
-# its Next.js toolchain never enter the build. The root tsconfig still
-# references apps/web, so the server project is built directly rather than
-# through the root, which would drag in a second site nobody is deploying.
+# its Next.js toolchain never enter the build. The server project is built
+# directly rather than through the root tsconfig, so nothing but the server
+# and the packages it depends on is compiled.
 #
 # Built for whichever architecture it is built on. arm64 matters: the cheapest
 # always-free compute is ARM, and PGlite ships wasm, so it does not care.
@@ -41,7 +41,7 @@ COPY packages ./packages
 COPY apps/mcp-server ./apps/mcp-server
 
 # tsc --build follows this project's references, so the three packages it
-# depends on are compiled with it and apps/web is not.
+# depends on are compiled with it.
 RUN pnpm --filter @power/mcp-server run build
 
 # Drop everything that was only needed to compile. Done here rather than by

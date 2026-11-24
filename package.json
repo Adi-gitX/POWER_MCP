@@ -17,8 +17,6 @@
     "clean": "tsc --build --clean",
     "dev": "pnpm --filter @power/mcp-server dev",
     "e2e": "pnpm --filter @power/mcp-server e2e",
-    "build:web": "pnpm --filter @power/site build",
-    "dev:web": "pnpm --filter @power/site dev",
     "build:site": "pnpm --filter @power/site build",
     "dev:site": "pnpm --filter @power/site dev",
     "visual": "node scripts/visual-pass.mjs"

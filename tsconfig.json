@@ -15,9 +15,6 @@
     },
     {
       "path": "./apps/mcp-server"
-    },
-    {
-      "path": "./apps/web"
     }
   ]
 }

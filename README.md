@@ -349,7 +349,7 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 
 **Publishing.** Push to `main` and `.github/workflows/deploy-site.yml` deploys to GitHub Pages. Enable Pages once (Settings → Pages → Source: GitHub Actions) and set the repository variable `SITE_URL` to your domain so canonical and OG URLs are right. Or connect the repo to Vercel with root directory `apps/site`; `vercel.json` is there.
 
-> `apps/web` is the previous hand-generated static site. Nothing builds or deploys from it any more. It is kept only for reference and can be deleted.
+**What deploys where.** `apps/site` (this marketing site) goes to Vercel: leave the project's Root Directory empty to use the root `vercel.json`, or set it to `apps/site`. `apps/mcp-server` (sign-in, the dashboard and the `/mcp` endpoint) needs a long-running process, a disk and `git`, so it cannot run on Vercel; deploy it as a container with the `Dockerfile`. The old static site, `apps/web`, has been removed.
 
 ---
 

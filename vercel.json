@@ -1,0 +1,35 @@
+{
+  "$comment": "Vercel deploys the marketing site (apps/site), a static export. This file is used when the Vercel project's Root Directory is the repository root; apps/site/vercel.json is used when it is apps/site. The app itself (apps/mcp-server: sign-in, dashboard, /mcp) is not deployable to Vercel and runs from the Dockerfile.",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @power/protocol build && pnpm build:site",
+  "outputDirectory": "apps/site/out",
+  "framework": null,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/_next/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}
