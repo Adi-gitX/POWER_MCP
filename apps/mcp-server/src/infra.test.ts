@@ -251,6 +251,15 @@ describe.each(BACKENDS)('control plane with RLS on $name', ({ open }) => {
     expect(await cp.planOf(owner)).toBe('pro');
   });
 
+  it('keeps setup progress per account and merges updates', async () => {
+    expect(await cp.getSetup(owner)).toEqual({});
+    await cp.updateSetup(owner, { platform: 'cursor' });
+    const merged = await cp.updateSetup(owner, { vercel_skipped_at: '2026-11-21T00:00:00.000Z' });
+    expect(merged).toEqual({ platform: 'cursor', vercel_skipped_at: '2026-11-21T00:00:00.000Z' });
+    await cp.ensureUser(intruder);
+    expect(await cp.getSetup(intruder)).toEqual({});
+  });
+
   it('renames a project without moving its slug, and only for its owner', async () => {
     const alice = cp.storeFor(owner);
     const renamed = await alice.renameProject(pid, 'B');

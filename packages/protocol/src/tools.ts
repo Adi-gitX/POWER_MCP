@@ -65,7 +65,7 @@ export const TOOLS: readonly ToolSpec[] = [
   read('get_next_action', ANY, 'The next call to make', 'The single tool call this run expects next, and why. Call it when a refusal leaves you unsure what to do.'),
   read('list_projects', ANY, 'List projects', 'Every project on this account. The usual first call in a new conversation.'),
   read('get_project', ANY, 'Get one project', 'One project: status, URLs and environments.'),
-  read('get_guides', ANY, 'Get a role brief or template', 'A role brief or artifact template: architect, implementer, verifier, or spec_template.'),
+  read('get_guides', ANY, 'Get a role brief or template', 'A role brief or artifact template: researcher, architect, implementer, builder, verifier, or spec_template.'),
   read('get_job', ANY, 'Poll a background job', 'The state of a job started by a slow tool. Free, so poll it as often as you like.'),
 
   // ---- Reading. Free by design.
@@ -94,6 +94,7 @@ export const TOOLS: readonly ToolSpec[] = [
 
   // ---- Gates. Each submits an artifact for checking and is legal in exactly
   // one phase; calling one out of phase is refused with the reason.
+  m('submit_research', ['research'], 'Submit research', 'Power Up runs only. Submit research.json to the research gate: sourced findings the plan will build on. Refused with the failing rule if a claim has no source.', { idempotent: true, open_world: true }),
   m('submit_spec', ['spec'], 'Submit the plan', 'Submit SPEC.md to the spec gate. Legal in the spec phase. Refused with the failing rule if the plan is incomplete.', { idempotent: true }),
   m('request_spec_approval', ['spec_approval'], 'Ask for plan approval', 'Ask the person to approve the plan in their browser. Only they can approve it; you cannot.', { idempotent: true }),
   m('submit_verification', ['verify'], 'Submit verification', 'Submit verification.json to the verification gate. Legal in the verify phase, once the tests are green.', { idempotent: true }),
@@ -126,7 +127,7 @@ export const TOOLS: readonly ToolSpec[] = [
   m('restore_checkpoint', ['build', 'verify', 'blocked'], 'Restore a checkpoint', 'Roll the workbench back to a checkpoint, discarding work after it.', { destructive: true, idempotent: true }),
 
   // ---- Release. Everything here changes what real users see.
-  m('publish_app', ['verify'], 'Publish', 'Publish the verified build to the live app. The person must confirm this in their browser first.', { live: true, async: true, destructive: true }),
+  m('publish_app', ['build', 'verify'], 'Publish', 'Publish the build to the live app once its conditions hold: green checks (and, with Power Up, an approved plan and passed verification). The person must confirm this in their browser first.', { live: true, async: true, destructive: true }),
   m('rollback', ANY, 'Roll back', 'Return the live app to its previous version.', { live: true, async: true, destructive: true }),
   m('unpublish_app', ANY, 'Take the app down', 'Take the live app offline.', { live: true, destructive: true, idempotent: true }),
 

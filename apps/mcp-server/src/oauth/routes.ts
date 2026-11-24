@@ -12,7 +12,7 @@
  * Composing the four handlers directly costs a few lines and gives exact
  * control of both.
  */
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import express, { type Express, type Request, type Response } from 'express';
 import { authorizationHandler } from '@modelcontextprotocol/sdk/server/auth/handlers/authorize.js';
 import { clientRegistrationHandler } from '@modelcontextprotocol/sdk/server/auth/handlers/register.js';
@@ -26,16 +26,19 @@ import {
   type OAuthConfig,
 } from './metadata.js';
 import {
+  codeEmail,
+  codeEndedPage,
   consentPage,
   linkExpiredPage,
   loginPage,
-  loginSentPage,
   requestExpiredPage,
+  verifyPage,
   type Mailer,
 } from './pages.js';
 import { mintAuthorizationCode, PowerOAuthProvider } from './provider.js';
 import { randomToken, sha256, type OAuthStore } from './store.js';
 import { readCookie, SESSION_COOKIE } from './cookies.js';
+import { configureShell } from './shell.js';
 
 export { SESSION_COOKIE, sessionIdFromHeader } from './cookies.js';
 
@@ -63,6 +66,24 @@ export interface OAuthDeps {
   signOutUrl?: string;
 }
 
+/** The cookie that ties a browser to the sign-in it started. Scoped to /login. */
+export const LOGIN_CHALLENGE_COOKIE = 'power_login';
+/** How long a code works. */
+export const CODE_TTL_MS = 10 * 60 * 1000;
+/** Wrong guesses before a code stops working: one in 200,000 odds at most. */
+export const MAX_ATTEMPTS = 5;
+/** Codes one sign-in may send, including the first. */
+export const MAX_SENDS = 5;
+export const RESEND_COOLDOWN_MS = 30 * 1000;
+/** Codes per address in a rolling window, across sign-ins, so a mailbox cannot be flooded. */
+const CODE_WINDOW_MS = 15 * 60 * 1000;
+const CODE_SENDS_PER_WINDOW = 8;
+
+/** Bound to the challenge id, so a code is useless outside the browser that asked for it. */
+export function codeHash(challengeId: string, code: string): string {
+  return createHash('sha256').update(`${challengeId}:${code}`).digest('hex');
+}
+
 /** Paths the Express app owns. Checked by index.ts before its own routing. */
 const OAUTH_PREFIXES = ['/.well-known/oauth-', '/oauth/', '/login', '/logout'];
 export function isOAuthPath(pathname: string): boolean {
@@ -72,6 +93,7 @@ export function isOAuthPath(pathname: string): boolean {
 export function createOAuthApp(deps: OAuthDeps): Express {
   const { store, controlPlane, config, mailer } = deps;
   const provider = new PowerOAuthProvider(store, config);
+  configureShell({ siteUrl: deps.signOutUrl ?? signOutDestination(config.issuer) });
   const app = express();
 
   app.disable('x-powered-by');
@@ -116,28 +138,97 @@ export function createOAuthApp(deps: OAuthDeps): Express {
   app.post('/login', async (req, res) => {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     const next = safeNext(req.body?.next);
-    if (!email.includes('@') || email.length > 320) {
-      res.status(400).type('html').send(loginPage(next, 'That does not look like an email address.'));
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) {
+      res.status(400).type('html').send(loginPage(next, 'That does not look like an email address.', email));
+      return;
+    }
+    // Per address, not per account, so the limit says nothing about whether one exists.
+    if ((await store.countLoginCodes(email, new Date(Date.now() - CODE_WINDOW_MS))) >= CODE_SENDS_PER_WINDOW) {
+      res.status(429).type('html').send(loginPage(next, 'Too many codes for this address. Wait a few minutes, then try again.', email));
       return;
     }
 
-    const raw = randomToken();
-    await store.insertLoginChallenge({
-      token_hash: sha256(raw),
+    const id = randomToken();
+    const issued = await issueCode(email, clientIp(req), next);
+    await store.insertLoginCode({
+      id_hash: sha256(id),
       email,
-      expires_at: new Date(Date.now() + config.loginChallengeTtlSec * 1000),
+      code_hash: codeHash(id, issued.code),
+      link_hash: issued.linkHash,
+      next,
+      expires_at: issued.expiresAt,
       ip: clientIp(req),
     });
+    setChallengeCookie(res, id);
+    const sent = await deliver(email, issued.code, issued.link, id);
+    // Rendered whether or not the address is known, so the form cannot be
+    // used to test for an account. A failed send is said plainly: it is about
+    // the mail provider, not the person.
+    res.redirect(303, `/login/verify${sent ? '' : '?unsent=1'}`);
+  });
 
-    const link = `${config.issuer}/login/callback?token=${encodeURIComponent(raw)}&next=${encodeURIComponent(next)}`;
-    try {
-      await mailer.send(email, 'Your Power sign-in link', `Sign in: ${link}\n\nThis works once and expires in 15 minutes.`);
-    } catch (error) {
-      console.error('[power] could not send sign-in mail', error);
+  app.get('/login/verify', async (req, res) => {
+    const challenge = await currentChallenge(req);
+    if (!challenge) return res.redirect(303, '/login');
+    if (challenge.consumed_at) {
+      if (await sessionUser(req)) return res.redirect(303, safeNext(challenge.next));
+      return res.status(410).type('html').send(codeEndedPage('used'));
     }
-    // Rendered whether or not the address is known, and whether or not the
-    // send succeeded, so the form cannot be used to test for an account.
-    res.type('html').send(loginSentPage(email, deps.devLink ? link : undefined));
+    res.type('html').send(
+      verifyPage({
+        email: challenge.email,
+        resendIn: resendWait(challenge),
+        ...(req.query.unsent ? { error: 'We couldn’t send the email just now. Send a new code in a moment.' } : {}),
+        ...(req.query.resent ? { notice: 'A new code is on its way. The previous one no longer works.' } : {}),
+        ...(challenge.attempts >= MAX_ATTEMPTS ? { locked: true, error: 'Too many wrong codes. Send a new one to try again.' } : {}),
+        ...devCodeFor(challenge),
+      }),
+    );
+  });
+
+  app.post('/login/verify', async (req, res) => {
+    const id = readCookie(req.headers.cookie, LOGIN_CHALLENGE_COOKIE);
+    const challenge = id ? await store.readLoginCode(sha256(id)) : null;
+    if (!id || !challenge) return res.status(410).type('html').send(codeEndedPage('missing'));
+    if (challenge.consumed_at) return res.status(410).type('html').send(codeEndedPage('used'));
+    if (challenge.expires_at.getTime() <= Date.now()) return res.status(410).type('html').send(codeEndedPage('expired'));
+
+    const page = (status: number, error: string, locked = false) =>
+      res.status(status).type('html').send(verifyPage({ email: challenge.email, resendIn: resendWait(challenge), error, locked, ...devCodeFor(challenge) }));
+    if (challenge.attempts >= MAX_ATTEMPTS) return page(429, 'Too many wrong codes. Send a new one to try again.', true);
+
+    const code = String(req.body?.code ?? '').replace(/\D/g, '');
+    if (code.length !== 6) return page(400, 'Enter the 6-digit code from the email.');
+
+    const won = await store.consumeLoginCode(sha256(id), codeHash(id, code), MAX_ATTEMPTS);
+    if (!won) {
+      const after = await store.readLoginCode(sha256(id));
+      const left = MAX_ATTEMPTS - (after?.attempts ?? MAX_ATTEMPTS);
+      if (after && after.expires_at.getTime() <= Date.now()) return res.status(410).type('html').send(codeEndedPage('expired'));
+      return left > 0
+        ? page(400, `That code isn’t right. ${left} ${left === 1 ? 'try' : 'tries'} left.`)
+        : page(429, 'Too many wrong codes. Send a new one to try again.', true);
+    }
+    await signIn(res, won.email, clientIp(req), req.headers['user-agent'], [clearChallengeCookie()]);
+    res.redirect(303, safeNext(won.next));
+  });
+
+  app.post('/login/resend', async (req, res) => {
+    const id = readCookie(req.headers.cookie, LOGIN_CHALLENGE_COOKIE);
+    const challenge = id ? await store.readLoginCode(sha256(id)) : null;
+    if (!id || !challenge || challenge.consumed_at) return res.status(410).type('html').send(codeEndedPage(challenge?.consumed_at ? 'used' : 'missing'));
+    const wait = resendWait(challenge);
+    if (wait > 0) {
+      return res.status(429).type('html').send(verifyPage({ email: challenge.email, resendIn: wait, error: `You can send a new code in ${wait} seconds.`, ...devCodeFor(challenge) }));
+    }
+    if (challenge.sends >= MAX_SENDS || (await store.countLoginCodes(challenge.email, new Date(Date.now() - CODE_WINDOW_MS))) >= CODE_SENDS_PER_WINDOW) {
+      return res.status(429).type('html').send(loginPage(challenge.next, 'Too many codes for this address. Wait a few minutes, then start again.', challenge.email));
+    }
+    const issued = await issueCode(challenge.email, clientIp(req), challenge.next);
+    await store.replaceLoginCode(sha256(id), { code_hash: codeHash(id, issued.code), link_hash: issued.linkHash, expires_at: issued.expiresAt });
+    setChallengeCookie(res, id);
+    const sent = await deliver(challenge.email, issued.code, issued.link, id);
+    res.redirect(303, `/login/verify?${sent ? 'resent=1' : 'unsent=1'}`);
   });
 
   app.get('/login/callback', async (req, res) => {
@@ -153,7 +244,8 @@ export function createOAuthApp(deps: OAuthDeps): Express {
       res.status(400).type('html').send(linkExpiredPage('expired'));
       return;
     }
-    await signIn(res, challenge.email, clientIp(req), req.headers['user-agent']);
+    await store.consumeLoginCodeByLink(sha256(token));
+    await signIn(res, challenge.email, clientIp(req), req.headers['user-agent'], [clearChallengeCookie()]);
     res.redirect(302, safeNext(req.query.next));
   });
 
@@ -253,7 +345,7 @@ export function createOAuthApp(deps: OAuthDeps): Express {
 
   // ---- helpers bound to this app's dependencies
 
-  async function signIn(res: Response, email: string, ip: string | null, userAgent?: string): Promise<void> {
+  async function signIn(res: Response, email: string, ip: string | null, userAgent?: string, extraCookies: string[] = []): Promise<void> {
     let userId = await store.userIdForEmail(email);
     if (!userId) userId = (await store.createUser(email)).user_id;
     // Keeps the tenant-side `users` row in step, which metering reads.
@@ -272,8 +364,7 @@ export function createOAuthApp(deps: OAuthDeps): Express {
     // from claude.ai, and Strict would drop the cookie and loop the person
     // back through login forever.
     const secure = !isLoopback(new URL(config.issuer).hostname);
-    res.setHeader(
-      'set-cookie',
+    res.setHeader('set-cookie', [
       [
         `${SESSION_COOKIE}=${raw}`,
         'Path=/',
@@ -282,7 +373,61 @@ export function createOAuthApp(deps: OAuthDeps): Express {
         `Max-Age=${config.sessionTtlSec}`,
         ...(secure ? ['Secure'] : []),
       ].join('; '),
-    );
+      ...extraCookies,
+    ]);
+  }
+
+  // ---- one-time codes
+
+  const secureCookies = !isLoopback(new URL(config.issuer).hostname);
+  /** Codes shown on the page when mail goes to the console. Loopback only; never persisted. */
+  const devCodes = new Map<string, string>();
+
+  /** A fresh code plus the link that travels with it, both for one window. */
+  async function issueCode(email: string, ip: string | null, next: string) {
+    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+    const linkToken = randomToken();
+    const expiresAt = new Date(Date.now() + CODE_TTL_MS);
+    await store.insertLoginChallenge({ token_hash: sha256(linkToken), email, expires_at: expiresAt, ip });
+    const link = `${config.issuer}/login/callback?token=${encodeURIComponent(linkToken)}&next=${encodeURIComponent(next)}`;
+    return { code, link, linkHash: sha256(linkToken), expiresAt };
+  }
+
+  /** Sends the code. False when the provider refused or was unreachable. */
+  async function deliver(email: string, code: string, link: string, id: string): Promise<boolean> {
+    if (deps.devLink) devCodes.set(sha256(id), code);
+    const message = codeEmail(code, link, Math.round(CODE_TTL_MS / 60_000));
+    try {
+      const sent = await mailer.send(email, message.subject, message.text, message.html);
+      if (sent.id && !secureCookies) console.log(`[power] sign-in code sent (message ${sent.id})`);
+      return true;
+    } catch (error) {
+      console.error('[power] could not send the sign-in code:', (error as Error).message);
+      return false;
+    }
+  }
+
+  function setChallengeCookie(res: Response, id: string): void {
+    const cookie = [`${LOGIN_CHALLENGE_COOKIE}=${id}`, 'Path=/login', 'HttpOnly', 'SameSite=Lax', `Max-Age=${Math.round(CODE_TTL_MS / 1000)}`, ...(secureCookies ? ['Secure'] : [])].join('; ');
+    res.setHeader('set-cookie', cookie);
+  }
+
+  function clearChallengeCookie(): string {
+    return `${LOGIN_CHALLENGE_COOKIE}=; Path=/login; HttpOnly; SameSite=Lax; Max-Age=0${secureCookies ? '; Secure' : ''}`;
+  }
+
+  async function currentChallenge(req: Request) {
+    const id = readCookie(req.headers.cookie, LOGIN_CHALLENGE_COOKIE);
+    return id ? store.readLoginCode(sha256(id)) : null;
+  }
+
+  function resendWait(c: { last_sent_at: Date }): number {
+    return Math.max(0, Math.ceil((c.last_sent_at.getTime() + RESEND_COOLDOWN_MS - Date.now()) / 1000));
+  }
+
+  function devCodeFor(c: { id_hash: string }): { devCode?: string } {
+    const code = deps.devLink ? devCodes.get(c.id_hash) : undefined;
+    return code ? { devCode: `${code.slice(0, 3)} ${code.slice(3)}` } : {};
   }
 
   async function sessionUser(req: Request): Promise<string | null> {

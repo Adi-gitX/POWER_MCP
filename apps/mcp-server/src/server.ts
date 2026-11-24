@@ -46,6 +46,12 @@ export interface Deps {
   meter: Meter;
   baseUrl: string;
   previewBaseUrl: string;
+  /** The account's Power Up setting, for runs that do not choose. */
+  powerUpDefault: (userId: string) => Promise<boolean>;
+  /** The newest project started in the browser that no assistant has picked up yet. */
+  pendingHandoff?: (userId: string) => Promise<{ project_id: string; name: string; brief: string } | null>;
+  /** A tool call touched this project: how the hand-off page knows the assistant picked it up. */
+  onProjectCall?: (userId: string, projectId: string) => void;
 }
 
 /** How long a slow tool waits before handing back a job id. */
@@ -212,6 +218,8 @@ async function execute(name: string, args: Record<string, unknown>, deps: Deps, 
       userId: principal.user_id,
       baseUrl: deps.baseUrl,
       previewBaseUrl: deps.previewBaseUrl,
+      powerUpDefault: () => deps.powerUpDefault(principal.user_id),
+      ...(deps.pendingHandoff ? { pendingHandoff: () => deps.pendingHandoff!(principal.user_id) } : {}),
       project: null,
       state: null,
       approvals: null,
@@ -229,6 +237,7 @@ async function execute(name: string, args: Record<string, unknown>, deps: Deps, 
       }
       ctx.state = await store.getRun(id);
       ctx.approvals = await store.getApprovals(id);
+      deps.onProjectCall?.(principal.user_id, id);
       context = buildContext({ projectId: id, state: ctx.state, env, lastErrors: await store.getGateErrors(id) });
 
       // Which human decision does this live-affecting tool need?

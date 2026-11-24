@@ -119,7 +119,7 @@ export default function PrivacyPage() {
                   'We do not sell your data, and we do not share it with advertisers or data brokers.',
                 ].map((line) => (
                   <li key={line} className="flex gap-2.5">
-                    <span className="mt-[0.1rem] text-pass privacy-check" aria-hidden="true">✓</span>
+                    <span className="mt-[0.1rem] text-pass">✓</span>
                     <span>{line}</span>
                   </li>
                 ))}
@@ -153,7 +153,7 @@ export default function PrivacyPage() {
               sites.
             </P>
             <div className="mt-6 overflow-x-auto">
-              <table className="legal-table w-full min-w-[34rem] border-collapse text-left text-[0.92rem]">
+              <table className="w-full min-w-[34rem] border-collapse text-left text-[0.92rem]">
                 <thead>
                   <tr className="border-b border-line-2">
                     <th className="py-3 pr-5 font-semibold text-ink">What</th>
@@ -164,9 +164,9 @@ export default function PrivacyPage() {
                 <tbody>
                   {COLLECTED.map(([what, why, how]) => (
                     <tr key={what} className="border-b border-line align-top">
-                      <td className="py-3.5 pr-5 text-ink" data-label="What">{what}</td>
-                      <td className="py-3.5 pr-5 leading-relaxed text-ink-2" data-label="Why we need it">{why}</td>
-                      <td className="py-3.5 leading-relaxed text-ink-2" data-label="How it is stored">{how}</td>
+                      <td className="py-3.5 pr-5 text-ink">{what}</td>
+                      <td className="py-3.5 pr-5 leading-relaxed text-ink-2">{why}</td>
+                      <td className="py-3.5 leading-relaxed text-ink-2">{how}</td>
                     </tr>
                   ))}
                 </tbody>

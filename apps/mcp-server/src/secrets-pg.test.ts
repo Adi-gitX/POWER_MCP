@@ -106,6 +106,19 @@ describe('account secrets', () => {
     expect(await secrets.valuesFor('p1', 'live')).not.toHaveProperty('DEPLOY_TOKEN');
   });
 
+  it('replaces an account credential in place, including with an empty team', async () => {
+    // Setup saves the team id next to the token; switching to a personal
+    // account overwrites it with '' so deploys stop sending a teamId.
+    const save = async (value: string) => {
+      const req = await secrets.request({ user_id: 'u3', project_id: null, name: 'POWER_DEPLOY_TEAM_ID', env: 'live', provider: 'hosting', why: 'setup' });
+      await secrets.set(req.token, value);
+    };
+    await save('team_abc');
+    expect(await secrets.accountValue('u3', 'POWER_DEPLOY_TEAM_ID')).toBe('team_abc');
+    await save('');
+    expect(await secrets.accountValue('u3', 'POWER_DEPLOY_TEAM_ID')).toBe('');
+  });
+
   it('reaches the scrubber, so a build log cannot echo it back', async () => {
     const values = await secrets.allValuesForUser('u1', 'p1');
     expect(values).toContain('deploy-token-value');

@@ -38,6 +38,10 @@ create table if not exists users (
   plan text not null default 'free' check (plan in ('free','pro','power')),
   created_at timestamptz not null default now()
 );
+-- Where the person is in first-run setup: which assistant they chose, whether
+-- they took the skill, and which hosting account they connected. No secrets:
+-- the hosting token itself lives in the encrypted secrets store.
+alter table users add column if not exists setup jsonb not null default '{}'::jsonb;
 
 create table if not exists projects (
   id text primary key,
@@ -358,12 +362,58 @@ export class PgliteSql implements Sql {
   }
 }
 
+export interface SetupState {
+  /** The assistant they build with, an id from the setup catalog. */
+  platform?: string;
+  skill_downloaded_at?: string;
+  /** Which platform's copy was downloaded; each one says how its client connects. */
+  skill_platform?: string;
+  /** The hosting account the saved token belongs to, for display only. */
+  vercel_account?: string;
+  vercel_team?: string;
+  vercel_connected_at?: string;
+  vercel_skipped_at?: string;
+  completed_at?: string;
+  /** Power Up for new runs: research, an approved plan and verification. Off unless turned on. */
+  power_up?: boolean;
+  /** Project id -> when an assistant first made a call on it, for the hand-off page. */
+  handoffs?: Record<string, string>;
+  /** The installer reported back: skill written, client configured. */
+  installer_ran_at?: string;
+  installer_platform?: string;
+  /** First MCP call from a tool holding this account's connection token. */
+  mcp_connected_at?: string;
+  mcp_client?: string;
+  /** How Vercel was connected: the OAuth integration or a pasted token. */
+  vercel_via?: 'oauth' | 'token';
+}
+
+function setupMethods(sql: Sql): Pick<ControlPlane, 'getSetup' | 'updateSetup'> {
+  return {
+    async getSetup(userId) {
+      const { rows } = await sql.query<{ setup: SetupState | null }>(`select setup from users where id = $1`, [userId]);
+      return rows[0]?.setup ?? {};
+    },
+    async updateSetup(userId, patch) {
+      const { rows } = await sql.query<{ setup: SetupState }>(
+        `update users set setup = coalesce(setup, '{}'::jsonb) || $2::jsonb where id = $1 returning setup`,
+        [userId, JSON.stringify(patch)],
+      );
+      return rows[0]?.setup ?? {};
+    },
+  };
+}
+
 export interface ControlPlane {
   sql: Sql;
   /** Server-owned OAuth state, in its own policy scope. */
   oauth: OAuthStore;
   ensureUser(userId: string, plan?: 'free' | 'pro' | 'power'): Promise<void>;
   planOf(userId: string): Promise<'free' | 'pro' | 'power'>;
+  /** First-run setup progress for one account. Empty until they start it. */
+  getSetup(userId: string): Promise<SetupState>;
+  /** Merge fields into the account's setup progress. */
+  updateSetup(userId: string, patch: Partial<SetupState>): Promise<SetupState>;
   storeFor(userId: string): Store;
   close(): Promise<void>;
 }
@@ -399,6 +449,7 @@ export async function openPgliteControlPlane(dir: string): Promise<ControlPlane>
       const { rows } = await sql.query<{ plan: 'free' | 'pro' | 'power' }>(`select plan from users where id = $1`, [userId]);
       return rows[0]?.plan ?? 'free';
     },
+    ...setupMethods(sql),
     storeFor: (userId) => new PgStore(sql, userId),
     close: () => db.close(),
   };
@@ -531,6 +582,7 @@ export async function openPgControlPlane(
       const { rows } = await sql.query<{ plan: 'free' | 'pro' | 'power' }>(`select plan from users where id = $1`, [userId]);
       return rows[0]?.plan ?? 'free';
     },
+    ...setupMethods(sql),
     storeFor: (userId) => new PgStore(sql, userId),
     close: () => pool.end(),
   };

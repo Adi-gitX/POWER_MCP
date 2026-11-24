@@ -1,15 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  MAX_RETRIES,
-  StateError,
-  apply,
-  canPublish,
-  createRunState,
-  parseRunState,
-  retriesRemaining,
-  type RunEvent,
-  type RunState,
-} from './index.js';
+import { MAX_RETRIES, type RunEvent, type RunState, StateError, apply, canPublish, createRunState, modeOf, parseRunState, retriesRemaining, systemClock } from './index.js';
 
 type GatedStage = 'research' | 'spec' | 'verification';
 
@@ -153,5 +143,48 @@ describe('persistence', () => {
     expect(() => parseRunState('{')).toThrow(/not valid JSON/);
     expect(() => parseRunState('{"version":2}')).toThrow(/unsupported/);
     expect(() => parseRunState('{"version":1,"phase":"nonsense"}')).toThrow(/unknown phase/);
+  });
+});
+
+describe('run modes', () => {
+  const green = (s: RunState) => apply(s, { type: 'self_verify', green: true });
+
+  it('defaults to the full pipeline, so existing callers keep every gate', () => {
+    expect(modeOf(createRunState('t1'))).toBe('power_up');
+    // A run stored before modes existed has no mode field at all.
+    const legacy = { ...createRunState('t0') } as RunState;
+    delete legacy.mode;
+    expect(modeOf(legacy)).toBe('power_up');
+  });
+
+  it('fast-tracks a standard run to the build, recording every stage as skipped', () => {
+    const s = apply(createRunState('t2', systemClock, 'standard'), { type: 'fast_track' });
+    expect(s.phase).toBe('build');
+    expect(s.gates).toEqual({ research: 'skipped', spec: 'skipped', verification: 'skipped' });
+    expect(s.approved_spec).toBe(false);
+  });
+
+  it('refuses to fast-track a Power Up run', () => {
+    expect(() => apply(createRunState('t3'), { type: 'fast_track' })).toThrow(StateError);
+  });
+
+  it('still refuses intake -> build for any other event, in either mode', () => {
+    expect(() => apply(createRunState('t4', systemClock, 'standard'), { type: 'build_started' })).toThrow(StateError);
+  });
+
+  it('lets a standard run publish from the build once its own checks are green', () => {
+    const built = apply(createRunState('t5', systemClock, 'standard'), { type: 'fast_track' });
+    expect(canPublish(built)).toEqual({ allowed: false, missing: ["the implementer's own checks are not green"] });
+    const done = apply(green(built), { type: 'published' });
+    expect(done.phase).toBe('done');
+  });
+
+  it('keeps all three conditions for a Power Up run, and no publishing from the build', () => {
+    let s = apply(createRunState('t6'), { type: 'research_skipped' });
+    s = apply(s, { type: 'gate_result', stage: 'spec', result: { stage: 'spec', pass: true, errors: [] } as never });
+    s = green(apply(s, { type: 'spec_approved' }));
+    expect(s.phase).toBe('build');
+    expect(canPublish(s).missing).toEqual(['verification has not passed its gate']);
+    expect(() => apply(s, { type: 'published' })).toThrow(StateError);
   });
 });

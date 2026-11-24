@@ -59,7 +59,19 @@ claude mcp add --transport http power http://localhost:4321/mcp
 
 ### Signing in
 
-Open http://localhost:4321/ in a browser. Accounts are passwordless: enter an address and follow the one-time link. On loopback with no mail provider configured, the link is also shown on the next page, so the flow works without a mailbox; set `RESEND_API_KEY` and `POWER_MAIL_FROM` to send it for real, or `POWER_DEV_LOGIN=1` to add `/login/dev` for automated runs.
+Open http://localhost:4321/ in a browser. Accounts are passwordless: enter an address, and Power emails a 6-digit code (with a one-time link as a fallback). The code works once, expires in 10 minutes and allows 5 wrong tries; "Send a new code" replaces it after a 30-second cooldown, at most 5 times per sign-in and 8 codes per address per 15 minutes. The pending sign-in lives in an HttpOnly cookie scoped to `/login`, and only hashes are stored. Set `RESEND_API_KEY` (and `POWER_MAIL_FROM` on a domain you have verified with Resend; without it the shared `onboarding@resend.dev` sender is used, which only delivers to your own Resend account's address and Resend's test inboxes). The server reads `.env` at the repository root, so the key can live there. With no mail provider on loopback, the code is printed in the log and shown on the page so the flow works without a mailbox; `POWER_DEV_LOGIN=1` adds `/login/dev` for automated runs.
+
+**First-run setup.** A new account lands on `/start` after signing up ("Start building" on the site goes there too), and setup does the work rather than describing it:
+
+1. **Pick the assistant** (Claude Code, Cursor, Codex, the Claude app or any MCP client).
+2. **Power connects it.** For Claude Code, Cursor and Codex the page opens the tool with one command typed in, `curl -fsSL <server>/setup/<code> | sh`. The command installs the Power skill where that tool reads skills, exchanges its single-use code (15 minutes, once) for a per-assistant connection token, and writes the token straight into the tool's MCP config (`claude mcp add`, `~/.cursor/mcp.json`, `~/.codex/config.toml`), backing up and merging rather than overwriting, and never printing the token. The page watches the hand-off and polls `/start/status`: it ticks off "installed" when the command reports back and "connected" on the tool's first MCP call, then moves on by itself. Connected tools are listed under **Connect**, each revocable. The Claude app connects from Anthropic's cloud, so it gets the skill as a `.zip` upload and connector steps instead, and needs a public `POWER_BASE_URL`.
+3. **Connect Vercel.** With a Vercel integration configured (`POWER_VERCEL_CLIENT_ID`, `POWER_VERCEL_CLIENT_SECRET`, `POWER_VERCEL_INTEGRATION_SLUG`), this is one approval in Vercel and back; otherwise paste a token. Either way it is checked with Vercel and stored as the encrypted account secret `publish_app` reads.
+
+Every step can be skipped or finished later, and stays under **Setup** in the app.
+
+**Power Up.** Runs come in two modes, fixed when a run starts. *Standard* (the default) goes straight to the build: the implementer's own typecheck and tests must be green, the person confirms in the browser, and it publishes; research, the plan and verification are recorded as skipped, never as passed. *Power Up* is the full pipeline: sourced research (`submit_research`, checked by the research gate), a plan the person approves, the build, and independent verification before publishing. The switch on **Projects** sets the account's default for new runs; an assistant can pass `power_up: true` (or `false`) to `create_project` or `start_run` when the person asks. Runs from before modes existed keep every gate.
+
+**Handing a project to your assistant.** "Start something new" on **Projects** (and the last setup step) takes what you want to build, creates the project with your Power Up choice, and opens your assistant with one message carrying the project's name and id, your request and the mode — plus the one-command connection when that assistant is not connected yet. Every project has **Open in …** with a "pick up where it left off" message. The page watches for the assistant's first call on that project and moves on by itself. Desktop links (`claude-cli://`, `cursor://`, `codex://`) type the message in and wait for Enter; that is a limit of the apps, not of Power. For Claude Code and Codex the page also offers a terminal command (`claude '…'`, `codex '…'`) that starts the session with the message already sent.
 
 Signing in is what makes the companion yours. Every project, approval and secret belongs to that account, and a signed-out browser is redirected to the sign-in page and returned to the page it asked for. MCP clients reach the same account through OAuth.
 
@@ -105,7 +117,7 @@ The e2e run is organised as the product is: *plan · human approves in the brows
 
 ## Repository map
 
-A pnpm workspace. Four libraries, two apps.
+A pnpm workspace. Four libraries, two apps: `apps/site` (the marketing site, deployed to Vercel) and `apps/mcp-server` (the app, deployed as a container).
 
 | Path | What it is |
 |---|---|
@@ -347,9 +359,14 @@ Two things keep it honest. The pricing page and the docs read `PLANS` and `TOOLS
 
 The page is readable without JavaScript: the served HTML is visible, and only a browser that ran the head script hides a section until it scrolls into view. Reduced motion skips the animation entirely, in CSS.
 
-**Publishing.** Push to `main` and `.github/workflows/deploy-site.yml` deploys to GitHub Pages. Enable Pages once (Settings → Pages → Source: GitHub Actions) and set the repository variable `SITE_URL` to your domain so canonical and OG URLs are right. Or connect the repo to Vercel with root directory `apps/site`; `vercel.json` is there.
+**Publishing.** Push to `main` and `.github/workflows/deploy-site.yml` deploys to GitHub Pages. Enable Pages once (Settings → Pages → Source: GitHub Actions) and set the repository variable `SITE_URL` to your domain so canonical and OG URLs are right. Or connect the repo to Vercel: set the project's Root Directory to `apps/site` (uses `apps/site/vercel.json`), or leave it empty (uses the root `vercel.json`, which builds the same site). Either way the output is the marketing site only.
 
-**What deploys where.** `apps/site` (this marketing site) goes to Vercel: leave the project's Root Directory empty to use the root `vercel.json`, or set it to `apps/site`. `apps/mcp-server` (sign-in, the dashboard and the `/mcp` endpoint) needs a long-running process, a disk and `git`, so it cannot run on Vercel; deploy it as a container with the `Dockerfile`. The old static site, `apps/web`, has been removed.
+What goes where:
+
+| Path | What it is | Where it runs |
+|---|---|---|
+| `apps/site` | Marketing site (Next.js static export) | Vercel or GitHub Pages |
+| `apps/mcp-server` | The app: sign-in, dashboard, `/mcp` | A container (`Dockerfile`): it needs a long-running process, a disk and `git`, so it cannot run on Vercel |
 
 ---
 
@@ -360,7 +377,6 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 | Unit tests | `pnpm check` | 288 tests across 17 files, plus typecheck. Three need `POWER_TEST_DATABASE_URL` and are skipped without it |
 | End to end | `pnpm dev` then `pnpm e2e` | 93 steps through a real MCP client |
 | A real model | `scripts/eval-claude.sh` | a live Claude session, transcripts committed |
-| Visual pass | Both dev servers, then `pnpm visual` | 12 screenshots in `screenshots/` at 1440 and 390, including a signed-in dashboard |
 
 **Unit** (288): gates, run state, guard, migration gate, jobs, metering, secrets, the project dashboard (search, filters, settings, rename), browser sessions and sign-in redirects, both database drivers (including the app's own `pg` connection and real per-branch databases), OAuth, CSRF, and RLS.
 
@@ -383,12 +399,17 @@ The page is readable without JavaScript: the served HTML is visible, and only a 
 | `POWER_SECRET_KEY` | required off loopback | 32 bytes, base64. Secrets are encrypted at rest and there is no safe default |
 | `POWER_DEPLOYER` | unset | `local` writes releases to disk and serves them; otherwise deploys to the user's hosting account |
 | `POWER_PROJECT_DATABASE_URL` | unset | Unset, project branches are PGlite on disk, served over a socket. Set, the same driver runs on real Postgres with one database per branch |
-| `POWER_DEV_AUTH` | unset | `1` authenticates every credential-less request as a dev user. Loopback only, and it declines anything that did present a credential |
+| `POWER_DEV_AUTH` | unset | `1` authenticates every credential-less MCP/API request (and project previews) as a dev user. Loopback only, and it declines anything that did present a credential. Dashboard pages opened in a browser still go through sign-in |
 | `POWER_DEV_LOGIN` | unset | `1` enables a browser sign-in with no email round trip, for CI |
 | `POWER_TOKENS` | unset | `tok:alice:pro,tok:bob:free` adds static bearer tokens alongside OAuth |
 | `REDIS_URL` | unset | Moves quota accounting from memory to Redis |
 | `STRIPE_SECRET_KEY` | unset | Billing integration |
+| `POWER_VERCEL_API_URL` | `https://api.vercel.com` | Vercel API origin, for pointing setup and publishing at a stand-in API in tests |
+| `POWER_VERCEL_WEB_URL` | `https://vercel.com` | Where the Vercel approval page lives; overridable for the same stand-in |
+| `POWER_VERCEL_CLIENT_ID` / `POWER_VERCEL_CLIENT_SECRET` / `POWER_VERCEL_INTEGRATION_SLUG` | unset | A Vercel integration for one-click "Connect with Vercel". Its redirect URL must be `<POWER_BASE_URL>/start/vercel/callback`. Unset, setup asks for a token instead |
 | `SITE_URL` | `https://usepower.dev` | Canonical origin for the built site |
+| `NEXT_PUBLIC_POWER_APP_URL` | `http://localhost:4321` | Where the site's "Start building", "Sign in" and "Workspace" links go, in dev and production builds alike. The deploy workflow and `vercel.json` set it to the hosted app |
+| `NEXT_PUBLIC_POWER_MCP_URL` | `<app URL>/mcp` locally, else `https://mcp.usepower.dev/mcp` | The MCP endpoint the site's docs tell people to add |
 
 ---
 

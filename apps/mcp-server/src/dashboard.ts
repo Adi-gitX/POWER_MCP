@@ -13,13 +13,13 @@
  * Deliberately server-rendered and dependency-free: it has to work when the
  * only thing running is the MCP server, including over a slow connection.
  */
-import { phaseLabel, retriesRemaining, type Phase, type RunState } from '@power/runstate';
-import { TOOLS, type Plan } from '@power/protocol';
+import { modeOf, phaseLabel, retriesRemaining, type Phase, type RunState } from '@power/runstate';
+import { PLANS, TOOLS, type Plan } from '@power/protocol';
 import { MARK, MARK_PATH } from './brand.js';
 import type { Approvals, DeploymentRecord, Project } from './store.js';
 import type { SecretRecord } from './secrets.js';
 
-const VERSION = '9';
+const VERSION = '18';
 
 export interface PageContext {
   baseUrl: string;
@@ -52,9 +52,11 @@ export interface ProjectView {
   csrf: string;
   dbLabel: string;
   deployerLabel: string;
+  /** The assistant the person chose in setup, for "Open in …". */
+  assistantName?: string | null;
 }
 
-const esc = (s: string): string =>
+export const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** One letter for the account chip; an address or an opaque id both work. */
@@ -111,8 +113,62 @@ export function relative(iso: string, now = Date.now()): string {
 
 // ------------------------------------------------------------------- shell
 
-function shell(ctx: PageContext, title: string, body: string, active?: 'projects' | 'connect'): string {
-  const navItem = (href: string, label: string, key: 'projects' | 'connect') =>
+export type NavKey = 'projects' | 'connect' | 'setup';
+
+/** A small stroke icon set, drawn inline so the page needs nothing else to load. */
+const ICON_PATHS = {
+  search: '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/>',
+  external: '<path d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8a1.5 1.5 0 0 0 1.5-1.5V10"/><path d="M9 2h5v5"/><path d="m14 2-6.5 6.5"/>',
+  gear: '<circle cx="8" cy="8" r="2"/><path d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7 3.4 3.4"/>',
+  terminal: '<rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="m4.5 6 2 2-2 2M8.5 10.5h3"/>',
+  check: '<path d="m3.5 8.5 3 3 6-7"/>',
+  alert: '<path d="M8 5v3.5M8 11h.01"/><circle cx="8" cy="8" r="6.5"/>',
+  arrow: '<path d="M3 8h10M9 4l4 4-4 4"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  chevron: '<path d="m4 6 4 4 4-4"/>',
+  copy: '<rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/>',
+  globe: '<circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c2 2.2 2 10.8 0 13M8 1.5c-2 2.2-2 10.8 0 13"/>',
+  db: '<ellipse cx="8" cy="3.5" rx="5.5" ry="2"/><path d="M2.5 3.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/>',
+  key: '<circle cx="5" cy="11" r="3"/><path d="m7.2 8.8 6.3-6.3M11.5 4.5l1.5 1.5"/>',
+  logout: '<path d="M10 3h2.5A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5H10M6.5 11 3.5 8l3-3M3.5 8H10"/>',
+  bolt: '<path d="M9 1.5 3 9h4.5L7 14.5 13 7H8.5z"/>',
+} as const;
+export type IconName = keyof typeof ICON_PATHS;
+export const icon = (name: IconName): string =>
+  `<svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICON_PATHS[name]}</svg>`;
+
+/** The account menu: who is signed in, what the plan allows today, and the way out. */
+function accountMenu(ctx: PageContext): string {
+  const who = ctx.email ?? ctx.user;
+  const limit = PLANS[ctx.plan]?.per_day ?? null;
+  const used = limit !== null ? Math.max(0, limit - ctx.remaining.day) : null;
+  const pct = limit ? Math.min(100, Math.round(((used ?? 0) / limit) * 100)) : 0;
+  return `<details class="menu">
+  <summary class="menu-trigger" aria-label="Account">
+    <span class="avatar" aria-hidden="true">${esc(initial(who))}</span>
+    <span class="menu-chev">${icon('chevron')}</span>
+  </summary>
+  <div class="menu-panel" role="menu">
+    <div class="menu-who">
+      <span class="avatar avatar-lg" aria-hidden="true">${esc(initial(who))}</span>
+      <span class="menu-id"><span class="menu-mail" title="${esc(who)}">${esc(who)}</span><span class="menu-plan">${esc(ctx.plan)} plan</span></span>
+    </div>
+    <div class="menu-usage">
+      <div class="menu-usage-row"><span>Build actions today</span><span class="mono">${ctx.remaining.day}${limit !== null ? ` / ${limit}` : ''} left</span></div>
+      ${limit !== null ? `<span class="meter" aria-hidden="true"><span style="width:${pct}%"></span></span>` : ''}
+      <span class="menu-hint">Reads and exports are free. Resets at midnight UTC.</span>
+    </div>
+    <nav class="menu-links">
+      <a href="/connect" role="menuitem">${icon('terminal')}Connect an assistant</a>
+      <a href="/start/vercel" role="menuitem">${icon('globe')}Hosting on Vercel</a>
+      <a href="/logout" role="menuitem">${icon('logout')}Sign out</a>
+    </nav>
+  </div>
+</details>`;
+}
+
+export function shell(ctx: PageContext, title: string, body: string, active?: NavKey): string {
+  const navItem = (href: string, label: string, key: NavKey) =>
     `<a href="${href}"${active === key ? ' aria-current="page"' : ''}>${label}</a>`;
 
   return `<!doctype html>
@@ -120,8 +176,8 @@ function shell(ctx: PageContext, title: string, body: string, active?: 'projects
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light">
-<meta name="theme-color" content="#f4f1ea">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
 <meta name="robots" content="noindex">
 <title>${esc(title)} · Power</title>
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
@@ -134,13 +190,8 @@ function shell(ctx: PageContext, title: string, body: string, active?: 'projects
     <a class="brand" href="/">${MARK}<span>Power</span></a>
     <nav aria-label="Workspace">${navItem('/', 'Projects', 'projects')}${navItem('/connect', 'Connect', 'connect')}</nav>
     <div class="who">
-      <span class="plan">${esc(ctx.plan)}</span>
-      <span class="quota">${ctx.remaining.day} ${ctx.remaining.day === 1 ? 'action' : 'actions'} left</span>
-      <span class="account" title="${esc(ctx.email ?? ctx.user)}">
-        <span class="avatar" aria-hidden="true">${esc(initial(ctx.email ?? ctx.user))}</span>
-        <span class="account-mail">${esc(ctx.email ?? ctx.user)}</span>
-      </span>
-      <a class="signout" href="/logout">Sign out</a>
+      <span class="quota" title="Build actions left today">${icon('bolt')}<span class="mono">${ctx.remaining.day}</span></span>
+      ${accountMenu(ctx)}
     </div>
   </div>
 </header>
@@ -148,21 +199,28 @@ function shell(ctx: PageContext, title: string, body: string, active?: 'projects
 ${body}
 </main>
 <footer class="foot">
-  <span class="foot-brand">${MARK}<span>Power</span></span><span aria-hidden="true">·</span>
-  <span class="mono">${esc(ctx.baseUrl.replace(/^https?:\/\//, ''))}/mcp</span>
+  <span class="foot-brand">${MARK}<span>Power</span></span>
   <span class="spacer"></span>
-  <span>${esc(ctx.email ?? ctx.user)}</span>
+  <button class="foot-endpoint" type="button" data-copy="${esc(ctx.baseUrl)}/mcp" title="Copy the MCP endpoint">${icon('copy')}<span class="mono">${esc(ctx.baseUrl.replace(/^https?:\/\//, ''))}/mcp</span></button>
 </footer>
+<div class="toast" role="status" aria-live="polite" hidden>Copied</div>
 <script>
+const toast = document.querySelector('.toast');
+let toastTimer;
 for (const button of document.querySelectorAll('[data-copy]')) {
   button.addEventListener('click', async () => {
     const value = button.getAttribute('data-copy') || '';
     try { await navigator.clipboard.writeText(value); } catch { return; }
-    const original = button.textContent;
-    button.textContent = 'Copied';
-    setTimeout(() => { button.textContent = original; }, 1400);
+    if (!toast) return;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, 1600);
   });
 }
+// The account menu closes on a click elsewhere or Escape, like any menu.
+const menu = document.querySelector('details.menu');
+document.addEventListener('click', (e) => { if (menu && menu.open && !menu.contains(e.target)) menu.open = false; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && menu && menu.open) { menu.open = false; menu.querySelector('summary')?.focus(); } });
 </script>
 </body>
 </html>`;
@@ -257,6 +315,33 @@ export function filterProjects(rows: ProjectRow[], query: string, filter: Projec
 export interface ProjectsOptions {
   q?: string;
   filter?: ProjectFilter;
+  /** The account's Power Up setting and the form proof to change it. */
+  powerUp?: { on: boolean; csrf: string };
+  /** The "start something new" form, rendered by the setup module. */
+  composer?: string;
+  /** The New app dialog's mount point and bundle. */
+  newApp?: string;
+}
+
+/**
+ * The Power Up switch. A real form, so it works without JavaScript; with it,
+ * flipping the switch submits by itself.
+ */
+export function powerUpSwitch(on: boolean, csrf: string, back = '/'): string {
+  return `<form class="powerup" method="post" action="/start/power-up" data-on="${on}">
+  ${csrf}
+  <input type="hidden" name="back" value="${esc(back)}">
+  <input type="hidden" name="power_up" value="${on ? 'off' : 'on'}">
+  <div class="powerup-copy">
+    <span class="powerup-title">Power Up <span class="powerup-state">${on ? 'On' : 'Off'}</span></span>
+    <span class="powerup-desc">${
+      on
+        ? 'New runs research first, write a plan for you to approve, and are verified before publishing.'
+        : 'New runs go straight to the build. Turn on for research, a plan you approve and independent verification.'
+    }</span>
+  </div>
+  <button class="switch" type="submit" role="switch" aria-checked="${on}" aria-label="Power Up for new runs"><span></span></button>
+</form>`;
 }
 
 /** Build a filter link that keeps the current search. */
@@ -285,91 +370,107 @@ export function projectsPage(rows: ProjectRow[], ctx: PageContext, options: Proj
   };
 
   const toolbar = rows.length
-    ? `<div class="list-tools">
+    ? `<div class="toolbar">
   <form class="search" method="get" action="/" role="search">
     <label class="sr-only" for="q">Search projects</label>
-    <input id="q" name="q" type="search" value="${esc(query)}" placeholder="Search by name or slug" autocomplete="off">
+    ${icon('search')}
+    <input id="q" name="q" type="search" value="${esc(query)}" placeholder="Search projects" autocomplete="off">
     ${filter !== 'all' ? `<input type="hidden" name="state" value="${filter}">` : ''}
-    <button class="btn btn-sm" type="submit">Search</button>
     ${filtered ? '<a class="clear" href="/">Clear</a>' : ''}
   </form>
-  <nav class="filters" aria-label="Filter projects">
+  <nav class="segmented" aria-label="Filter projects">
     ${FILTERS.map(
       (f) =>
-        `<a href="${esc(filterHref(query, f.key))}"${f.key === filter ? ' aria-current="page"' : ''}>${esc(f.label)} <span class="count">${counts[f.key]}</span></a>`,
+        `<a href="${esc(filterHref(query, f.key))}"${f.key === filter ? ' aria-current="page"' : ''}>${esc(f.label)}<span class="count">${counts[f.key]}</span></a>`,
     ).join('')}
   </nav>
 </div>`
     : '';
 
+  const card = ({ project, state, live }: ProjectRow): string => {
+    const tone = TONE[state.phase];
+    const url = live && live.ready_state === 'READY' ? absolute(live.url).replace(/^https?:\/\//, '').replace(/\/$/, '') : null;
+    const meter = MILESTONES.filter((m) => m.key !== 'started')
+      .map((m) => `<span data-state="${stepFor(state, m.key).state}"${m.key === 'live' && state.phase === 'done' ? ' data-live="1"' : ''}></span>`)
+      .join('');
+    return `<a class="pcard" href="/projects/${project.id}">
+  <span class="pcard-top">
+    <span class="pmark" aria-hidden="true">${esc(initial(project.name))}</span>
+    <span class="pcard-id">
+      <span class="pcard-name">${esc(project.name)}</span>
+      <span class="pcard-sub"><span class="mono">${esc(project.slug)}</span></span>
+      ${url ? `<span class="pcard-sub pcard-url">${icon('globe')}<span>${esc(url)}</span></span>` : ''}
+    </span>
+    <span class="chip" data-tone="${tone}">${esc(STATUS[state.phase])}</span>
+  </span>
+  <span class="pmeter" aria-label="${esc(phaseLabel(state.phase))}">${meter}</span>
+  <span class="pcard-foot">
+    <span class="pcard-mode">${modeOf(state) === 'power_up' ? `${icon('bolt')}Power Up` : 'Standard'}</span>
+    <span>updated ${esc(relative(state.updated_at))}${live ? ` · ${esc(versionLabel(live.version))}` : ''}</span>
+  </span>
+</a>`;
+  };
+
   const list = !projects.length
     ? rows.length
       ? `<div class="empty empty-search">
+  <span class="empty-icon">${icon('search')}</span>
   <h2>No projects match</h2>
   <p>Nothing here matches ${query ? `“${esc(query)}”` : 'that filter'}${filter !== 'all' ? ' and the selected status' : ''}.</p>
-  <a class="btn" href="/">Clear search</a>
+  <a class="btn btn-sm" href="/">Clear search</a>
 </div>`
-      : `<div class="start">
-  <div class="start-copy">
-    <p class="eyebrow">Get started</p>
-    <h2>No projects yet</h2>
-    <p>Power builds an app from a conversation. Connect an MCP client once, then ask it to create one — the project appears here as soon as it exists.</p>
-    <div class="start-actions">
-      <a class="btn btn-primary" href="/connect">Connect an assistant</a>
-      <a class="btn" href="#endpoint">Copy the endpoint</a>
-    </div>
-  </div>
-  <ol class="steps">
-    <li><span class="step-n">1</span><div><strong>Connect your assistant</strong><p>Add this server to Claude, Cursor or any MCP client. <a href="/connect">Setup and endpoint</a></p></div></li>
-    <li><span class="step-n">2</span><div><strong>Ask for the app</strong><p>Describe what you want. Power writes a plan before it writes code.</p></div></li>
-    <li><span class="step-n">3</span><div><strong>Approve and publish</strong><p>Plans, releases and anything destructive wait for you here.</p></div></li>
+      : `<section class="welcome-more">
+  <ol class="welcome-steps">
+    <li><span class="step-n">1</span><strong>Describe the app</strong><p>Name it and say what it does. Power sets up the project, the database and hosting.</p></li>
+    <li><span class="step-n">2</span><strong>Your assistant builds it</strong><p>Claude, Cursor or Codex opens with the brief and connects itself to Power.</p></li>
+    <li><span class="step-n">3</span><strong>Approve and publish</strong><p>Releases and anything destructive wait for you here, then ship to your Vercel.</p></li>
   </ol>
-</div>`
-    : `<div class="rows">${projects
-        .map(({ project, state, live }) => {
-          const tone = TONE[state.phase];
-          return `<a class="row" href="/projects/${project.id}">
-  <span class="row-mark" aria-hidden="true">${esc(initial(project.name))}</span>
-  <span class="row-main">
-    <span class="row-name">${esc(project.name)}</span>
-    <span class="row-sub">${esc(project.slug)}<span class="row-updated"> · updated ${esc(relative(state.updated_at))}</span>${live ? ` · live ${esc(versionLabel(live.version))}` : ''}</span>
-  </span>
-  <span class="row-state"><span class="chip" data-tone="${tone}">${esc(STATUS[state.phase])}</span></span>
-  <span class="row-go">View <span aria-hidden="true">→</span></span>
-</a>`;
-        })
-        .join('')}</div>`;
+  <span class="welcome-dunes" aria-hidden="true"></span>
+</section>`
+    : `<div class="pgrid-cards">${projects.map(card).join('')}${
+        filtered ? '' : `<button class="pcard pcard-new" type="button" data-new-app="new"><span class="pcard-new-icon">${icon('plus')}</span><span>New app</span><span class="pcard-new-sub">Describe it, pick your assistant</span></button>`
+      }</div>`;
+
+  const welcome = `<header class="welcome">
+  <p class="eyebrow">No projects yet</p>
+  <h1>Build an app with the assistant you already use.</h1>
+  <p class="lede">Describe it once. Power prepares everything, hands it to Claude, Cursor or Codex, and publishes when you approve.</p>
+  <div class="welcome-actions">
+    <button class="btn btn-primary btn-lg" type="button" data-new-app="new">+ New app</button>
+    <button class="btn btn-lg" type="button" data-new-app="import">Add your own app</button>
+  </div>
+</header>
+${options.newApp ?? ''}`;
+
+  if (!rows.length) return shell(ctx, 'Projects', `${welcome}\n${list}`, 'projects');
+
+  const limit = PLANS[ctx.plan]?.per_day ?? null;
+  const stat = (label: string, value: string, sub: string, tone = '') =>
+    `<div class="stat"${tone ? ` data-tone="${tone}"` : ''}><span class="stat-l">${label}</span><span class="stat-n">${value}</span><span class="stat-sub">${sub}</span></div>`;
 
   return shell(
     ctx,
     'Projects',
-    `<header class="hero">
-  <p class="eyebrow">Workspace</p>
-  <div class="hero-row">
-    <div>
-      <h1>Projects</h1>
-      <p class="lede">What your assistant is building, and the decisions it cannot make without you.</p>
-    </div>
-    ${needs ? `<div class="stat"><span class="stat-n">${needs}</span><span class="stat-l">need${needs === 1 ? 's' : ''} you</span></div>` : ''}
+    `<header class="page-head">
+  <div>
+    <h1>Projects</h1>
+    <p class="lede">What your assistant is building, and the decisions it cannot make without you.</p>
   </div>
-  <div class="hero-meta">
-    <span class="meta-pill"><span class="pulse" aria-hidden="true"></span><b>${esc(ctx.plan)}</b> plan</span>
-    <span class="meta-pill"><b>${ctx.remaining.day}</b> ${ctx.remaining.day === 1 ? 'action' : 'actions'} left today</span>
+  <div class="page-actions">
+    <button class="btn" type="button" data-new-app="import">Add your own app</button>
+    <button class="btn btn-primary" type="button" data-new-app="new">${icon('plus')}New app</button>
   </div>
 </header>
+${options.newApp ?? ''}
+<div class="stats">
+  ${stat('Projects', String(rows.length), limit !== null && PLANS[ctx.plan]?.projects ? `of ${PLANS[ctx.plan]!.projects} on ${esc(ctx.plan)}` : 'in this workspace')}
+  ${stat('Need you', String(needs), needs ? 'waiting on a decision' : 'nothing waiting', needs ? 'you' : '')}
+  ${stat('Live', String(rows.filter(isLive).length), 'serving on Vercel', rows.some(isLive) ? 'live' : '')}
+  ${stat('Actions left', String(ctx.remaining.day), limit !== null ? `of ${limit} today` : 'today')}
+</div>
 ${toolbar}
 ${filtered && projects.length ? `<p class="result-note">${projects.length} of ${rows.length} projects</p>` : ''}
-${list}
-<section class="endpoint" id="endpoint">
-  <div>
-    <h2>MCP endpoint</h2>
-    <p>Point an MCP client here. It uses the account this page is signed in to.</p>
-  </div>
-  <div class="copyline">
-    <code>${esc(ctx.baseUrl)}/mcp</code>
-    <button class="btn" type="button" data-copy="${esc(ctx.baseUrl)}/mcp">Copy</button>
-  </div>
-</section>`,
+${list}`,
     'projects',
   );
 }
@@ -386,7 +487,7 @@ const MILESTONES = [
 ] as const;
 
 type Milestone = (typeof MILESTONES)[number];
-type StepState = 'done' | 'now' | 'todo';
+type StepState = 'done' | 'now' | 'todo' | 'skip';
 
 const EVENT: Record<string, string> = {
   start_research: 'Research started',
@@ -408,6 +509,10 @@ const EVENT: Record<string, string> = {
 /** A milestone is a fact about the run, not a position in a list. */
 function stepFor(state: RunState, key: Milestone['key']): { state: StepState; detail: string } {
   const inPhase = (phases: readonly Phase[]) => phases.includes(state.phase);
+  // A standard run chose not to have these stages. Said plainly, never shown as passed.
+  if (modeOf(state) === 'standard' && (key === 'research' || key === 'plan' || key === 'verified')) {
+    return { state: 'skip', detail: 'Skipped · Power Up off' };
+  }
   const entered = (phases: readonly Phase[]) => state.history.find((e) => phases.includes(e.to))?.at ?? null;
   const event = (name: string) => state.history.find((e) => e.event === name)?.at ?? null;
 
@@ -470,23 +575,24 @@ function stepFor(state: RunState, key: Milestone['key']): { state: StepState; de
 }
 
 function timeline(state: RunState): string {
-  const steps = MILESTONES.map((m) => {
+  const steps = MILESTONES.map((m, i) => {
     const step = stepFor(state, m.key);
     const live = m.key === 'live' && state.phase === 'done' ? ' data-live="1"' : '';
+    const mark = step.state === 'done' ? icon('check') : step.state === 'skip' ? '' : `<span class="step-num">${i + 1}</span>`;
     return `<li class="step" data-state="${step.state}"${live}>
-  <span class="dot" aria-hidden="true"></span>
+  <span class="dot" aria-hidden="true">${mark}</span>
   <span class="step-body"><span class="step-label">${esc(m.label)}</span><span class="step-when">${esc(step.detail)}</span></span>
 </li>`;
   });
 
   if (state.phase === 'blocked') {
     steps.push(`<li class="step" data-state="now" data-stop="1">
-  <span class="dot" aria-hidden="true"></span>
+  <span class="dot" aria-hidden="true">${icon('alert')}</span>
   <span class="step-body"><span class="step-label">Needs your help</span><span class="step-when">${esc(when(state.updated_at))}</span></span>
 </li>`);
   }
 
-  return `<ol class="steps">${steps.join('')}</ol>`;
+  return `<ol class="stepper" aria-label="Progress">${steps.join('')}</ol>`;
 }
 
 const GATE_COPY: ReadonlyArray<{ key: 'research' | 'spec' | 'verification'; name: string; what: string }> = [
@@ -518,29 +624,42 @@ function gates(state: RunState): string {
   const rows = GATE_COPY.map((g) => {
     const status = state.gates[g.key];
     const word = gateWord(status);
-    return `<tr>
-  <td><div class="gate-name">${esc(g.name)}</div><div class="gate-desc">${esc(g.what)}</div></td>
-  <td class="gate-cell"><span class="chip" data-tone="${word.tone}">${word.label}</span></td>
-</tr>`;
+    return `<li class="gate" data-tone="${word.tone}">
+  <div class="gate-text"><div class="gate-name">${esc(g.name)}</div><div class="gate-desc">${esc(g.what)}</div></div>
+  <span class="chip" data-tone="${word.tone}">${word.label}</span>
+</li>`;
   }).join('');
-  return `<table class="gates"><tbody>${rows}</tbody></table>`;
+  return `<ul class="gates">${rows}</ul>`;
 }
 
 function historyTable(state: RunState): string {
-  if (!state.history.length) return '<p class="note">No transitions recorded yet.</p>';
+  if (!state.history.length) return '<p class="note">No activity recorded yet.</p>';
   const rows = [...state.history]
     .reverse()
     .map((entry) => {
-      const label = EVENT[entry.event] ?? entry.event.replace(/_/g, ' ');
-      const detail = entry.note ? `<div class="hist-note">${esc(entry.note)}</div>` : '';
-      return `<tr>
-  <td class="hist-time">${esc(when(entry.at))}</td>
-  <td><div>${esc(label)}</div>${detail}</td>
-  <td class="hist-move"><span class="mono">${esc(entry.from)}</span> <span aria-hidden="true">→</span> <span class="mono">${esc(entry.to)}</span></td>
-</tr>`;
+      const label = EVENT[entry.event] ?? entry.event.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+      const detail = entry.note ? `<span class="act-note">${esc(entry.note)}</span>` : '';
+      return `<li class="act">
+  <span class="act-dot" aria-hidden="true"></span>
+  <span class="act-body"><span class="act-title">${esc(label)}</span>${detail}</span>
+  <span class="act-side"><span class="act-move mono">${esc(entry.from)} → ${esc(entry.to)}</span><time datetime="${esc(entry.at)}" title="${esc(whenDated(entry.at))}">${esc(relative(entry.at))}</time></span>
+</li>`;
     })
     .join('');
-  return `<table class="hist"><tbody>${rows}</tbody></table>`;
+  return `<ol class="activity">${rows}</ol>`;
+}
+
+/** The one thing on the page that needs the person, as a banner with its action beside it. */
+function banner(tone: string, iconName: IconName, title: string, body: string, action = '', extra = ''): string {
+  return `<section class="decision" data-tone="${tone}" aria-labelledby="decision-title">
+  <span class="decision-icon" aria-hidden="true">${icon(iconName)}</span>
+  <div class="decision-body">
+    <h2 id="decision-title">${title}</h2>
+    ${body}
+    ${extra}
+  </div>
+  ${action ? `<div class="decision-action">${action}</div>` : ''}
+</section>`;
 }
 
 function decision(view: ProjectView): string {
@@ -549,61 +668,71 @@ function decision(view: ProjectView): string {
   const id = project.id;
 
   if (state.phase === 'spec_approval') {
-    return `<section class="decision" data-tone="you" aria-labelledby="decision-title">
-  <h2 id="decision-title">Your plan is ready</h2>
-  <p>Read it before you approve. Approval decides <em>what</em> gets built; the structure has already been checked by code. Your assistant cannot approve this for itself.</p>
-  <div class="actions">
-    ${view.spec ? `<a class="btn" href="/projects/${id}/spec">Read the plan</a>` : ''}
-    <form method="post" action="/projects/${id}/approve-spec">${csrf}<button class="btn btn-primary" type="submit">Approve the plan</button></form>
-  </div>
-  <form class="sendback" method="post" action="/projects/${id}/reject-spec">
+    return banner(
+      'you',
+      'alert',
+      'Your plan is ready',
+      '<p>Read it before you approve. Approval decides <em>what</em> gets built; the structure has already been checked by code. Your assistant cannot approve this for itself.</p>',
+      `${view.spec ? `<a class="btn" href="/projects/${id}/spec">Read the plan</a>` : ''}<form method="post" action="/projects/${id}/approve-spec">${csrf}<button class="btn btn-primary" type="submit">Approve the plan</button></form>`,
+      `<form class="sendback" method="post" action="/projects/${id}/reject-spec">
     ${csrf}
     <label for="reason">Or send it back with a reason</label>
-    <div class="sendback-row">
+    <div class="inline-form">
       <input id="reason" type="text" name="reason" placeholder="What should change?" autocomplete="off" required>
       <button class="btn" type="submit">Send back</button>
     </div>
-  </form>
-</section>`;
+  </form>`,
+    );
   }
 
-  if (state.phase === 'verify' && publish.allowed) {
+  const readyToShip = publish.allowed && (state.phase === 'verify' || (state.phase === 'build' && modeOf(state) === 'standard'));
+  if (readyToShip) {
     if (approvals.publish_confirmed_at) {
-      return `<section class="decision" data-tone="live" aria-labelledby="decision-title">
-  <h2 id="decision-title">Confirmed</h2>
-  <p>Your assistant can publish now. The confirmation is used once, by that publish.</p>
-</section>`;
+      return banner(
+        'live',
+        'check',
+        'Publish confirmed',
+        `<p>Your assistant can publish now. Tell it to go ahead; the confirmation is used once, by that publish.</p>`,
+      );
     }
-    return `<section class="decision" data-tone="you" aria-labelledby="decision-title">
-  <h2 id="decision-title">Verified. Publish it?</h2>
-  <p>Verification passed, your plan is approved and the build's own checks are green. Publishing makes <strong>${esc(project.name)}</strong> live.</p>
-  <form method="post" action="/projects/${id}/confirm-publish">${csrf}<button class="btn btn-primary" type="submit">Confirm publish</button></form>
-</section>`;
+    const standard = modeOf(state) === 'standard';
+    return banner(
+      'you',
+      'globe',
+      standard ? 'Ready. Publish it?' : 'Verified. Publish it?',
+      `<p>${standard ? 'Typecheck and tests are green.' : "Verification passed, your plan is approved and the build's own checks are green."} Publishing makes <strong>${esc(project.name)}</strong> live on your Vercel account.</p>`,
+      `<form method="post" action="/projects/${id}/confirm-publish">${csrf}<button class="btn btn-primary" type="submit">Confirm publish</button></form>`,
+    );
   }
 
   if (state.phase === 'blocked') {
-    return `<section class="decision" data-tone="stop" aria-labelledby="decision-title">
-  <h2 id="decision-title">The run stopped and needs you</h2>
-  <p>${esc(state.blocked_reason ?? 'No reason was recorded.')}</p>
-  <p class="note">Nothing has been published. Ask your assistant to restore a checkpoint, or tell it how to proceed.</p>
-</section>`;
+    return banner(
+      'stop',
+      'alert',
+      'The run stopped and needs you',
+      `<p>${esc(state.blocked_reason ?? 'No reason was recorded.')}</p><p class="note">Nothing has been published. Ask your assistant to restore a checkpoint, or tell it how to proceed.</p>`,
+    );
   }
 
   if (state.phase === 'done') {
     const release = view.deployments[0] ?? null;
     const url = release ? absolute(release.url) : null;
     const version = release?.version ?? view.live.version;
-    return `<section class="decision" data-tone="live" aria-labelledby="decision-title">
-  <h2 id="decision-title">Live</h2>
-  <p>${version ? `Version <span class="mono">${esc(versionLabel(version))}</span> is serving.` : 'The latest release is serving.'} Your assistant can still change it through a new run.</p>
-  ${url ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noreferrer">Open the app</a>` : ''}
-</section>`;
+    return banner(
+      'live',
+      'globe',
+      'Live',
+      `<p>${version ? `Version <span class="mono">${esc(versionLabel(version))}</span> is serving.` : 'The latest release is serving.'} Your assistant can still change it through a new run.</p>`,
+      url ? `<a class="btn btn-primary" href="${esc(url)}" target="_blank" rel="noreferrer">Open the app${icon('external')}</a>` : '',
+    );
   }
 
-  return `<section class="quiet" aria-labelledby="decision-title">
-  <h2 id="decision-title">Nothing needs you</h2>
-  <p>${esc(phaseLabel(state.phase))}. Your assistant is working; this page updates when the run reaches something that needs a decision.</p>
-</section>`;
+  return banner(
+    'quiet',
+    'bolt',
+    'Nothing needs you',
+    `<p>${esc(phaseLabel(state.phase))}. Your assistant is working; this page shows a decision here as soon as the run reaches one.</p>`,
+  );
 }
 
 function migrationBlock(view: ProjectView): string {
@@ -619,20 +748,25 @@ function migrationBlock(view: ProjectView): string {
       : `<form class="confirm" method="post" action="/projects/${project.id}/confirm-migration">
   ${csrf}
   <label for="migration-confirm">Type <span class="mono">${esc(project.slug)}</span> to confirm</label>
-  <div class="sendback-row">
+  <div class="inline-form">
     <input id="migration-confirm" type="text" name="confirm" autocomplete="off" required placeholder="${esc(project.slug)}">
     <button class="btn btn-primary" type="submit">Apply to live app</button>
   </div>
 </form>`
     : '<p class="note">Nothing existing is removed. It reaches the live app during verification.</p>';
 
-  return `<section class="decision" data-tone="${migration.destructive ? 'you' : 'work'}" aria-labelledby="migration-title">
-  <h2 id="migration-title">${esc(heading)}</h2>
-  <p><strong>${esc(migration.intent)}</strong></p>
-  <ul class="list">${lines}</ul>
-  ${migration.destructive ? '<p>This can lose data. Your assistant cannot apply it without the confirmation below.</p>' : ''}
-  ${action}
-</section>`;
+  return banner(
+    migration.destructive ? 'you' : 'quiet',
+    'db',
+    esc(heading),
+    `<p><strong>${esc(migration.intent)}</strong></p><ul class="list">${lines}</ul>${migration.destructive ? '<p>This can lose data. Your assistant cannot apply it without the confirmation below.</p>' : ''}`,
+    '',
+    action,
+  );
+}
+
+function card(title: string, body: string, aside = '', cls = ''): string {
+  return `<section class="card${cls ? ` ${cls}` : ''}"><header class="card-head"><h2>${title}</h2>${aside}</header>${body}</section>`;
 }
 
 function livePanel(view: ProjectView): string {
@@ -643,16 +777,14 @@ function livePanel(view: ProjectView): string {
   const serving = latest?.ready_state === 'READY';
 
   const body = latest
-    ? `<div class="live-head"><span class="chip" data-tone="${serving ? 'live' : 'work'}">${serving ? 'Live' : 'Deploying'}</span><span class="mono dim">${esc(versionLabel(latest.version))}</span></div>
-<p class="live-url mono"><a href="${esc(liveUrl!)}" target="_blank" rel="noreferrer">${esc(liveUrl!.replace(/^https?:\/\//, ''))}</a></p>
-<div class="actions">
+    ? `<a class="live-url" href="${esc(liveUrl!)}" target="_blank" rel="noreferrer">${icon('globe')}<span>${esc(liveUrl!.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</span>${icon('external')}</a>
+<div class="card-actions">
   <a class="btn btn-sm" href="${esc(liveUrl!)}" target="_blank" rel="noreferrer">Open</a>
   <a class="btn btn-sm" href="/projects/${view.project.id}/export" download>Export code</a>
 </div>`
-    : `<div class="live-head"><span class="chip" data-tone="work">Not published</span></div>
-<p class="note">Nothing is live yet. ${view.publish.allowed ? 'The run is ready to publish.' : 'Publishing needs the conditions below.'}</p>
-<ul class="conditions">${view.publish.missing.map((m) => `<li>${esc(m)}</li>`).join('') || '<li>All publish conditions are met.</li>'}</ul>
-<a class="btn btn-sm" href="/projects/${view.project.id}/export" download>Export code</a>`;
+    : `<p class="note">Nothing is live yet. ${view.publish.allowed ? 'The run is ready to publish.' : 'Publishing needs:'}</p>
+${view.publish.missing.length ? `<ul class="conditions">${view.publish.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>` : ''}
+<div class="card-actions"><a class="btn btn-sm" href="/projects/${view.project.id}/export" download>Export code</a></div>`;
 
   const deployments = view.deployments.length
     ? `<details class="deploys"><summary>${view.deployments.length} release${view.deployments.length === 1 ? '' : 's'}</summary><ul class="deploy-list">${view.deployments
@@ -660,7 +792,10 @@ function livePanel(view: ProjectView): string {
         .join('')}</ul></details>`
     : '';
 
-  return `<section class="panel"><h2>Live</h2>${body}${deployments}</section>`;
+  const chip = latest
+    ? `<span class="chip" data-tone="${serving ? 'live' : 'work'}">${serving ? 'Live' : 'Deploying'}${latest.version ? ` · ${esc(versionLabel(latest.version))}` : ''}</span>`
+    : '<span class="chip" data-tone="work">Not published</span>';
+  return card('Deployment', `${body}${deployments}`, chip);
 }
 
 /**
@@ -671,47 +806,42 @@ function livePanel(view: ProjectView): string {
 function servicesPanel(view: ProjectView): string {
   const latest = view.deployments[0] ?? null;
   const serving = latest?.ready_state === 'READY';
-  return `<section class="panel">
-  <h2>Services</h2>
-  <ul class="services">
-    <li>
-      <span class="service"><span class="service-name">Database</span><span class="service-meta">${esc(view.dbLabel)}</span></span>
-      <span class="status" data-tone="live">Configured</span>
-    </li>
-    <li>
-      <span class="service"><span class="service-name">Hosting</span><span class="service-meta">${esc(view.deployerLabel)}</span></span>
-      <span class="status" data-tone="${serving ? 'live' : 'idle'}">${serving ? 'Serving' : 'Idle'}</span>
-    </li>
-    <li>
-      <span class="service"><span class="service-name">Secrets</span><span class="service-meta">${view.secrets.length ? `${view.secrets.length} set` : 'None set'}</span></span>
-      <span class="status" data-tone="${view.secrets.length ? 'live' : 'idle'}">${view.secrets.length ? 'Configured' : 'Empty'}</span>
-    </li>
-  </ul>
-</section>`;
+  const row = (i: IconName, name: string, meta: string, tone: string, status: string) =>
+    `<li><span class="svc-icon">${icon(i)}</span><span class="service"><span class="service-name">${name}</span><span class="service-meta">${meta}</span></span><span class="status" data-tone="${tone}">${status}</span></li>`;
+  return card(
+    'Services',
+    `<ul class="services">
+    ${row('db', 'Database', esc(view.dbLabel), 'live', 'Ready')}
+    ${row('globe', 'Hosting', esc(view.deployerLabel), serving ? 'live' : 'idle', serving ? 'Serving' : 'Idle')}
+    ${row('key', 'Secrets', view.secrets.length ? `${view.secrets.length} set` : 'None set', view.secrets.length ? 'live' : 'idle', view.secrets.length ? 'Set' : 'Empty')}
+  </ul>`,
+  );
 }
 
-function detailsPanel(view: ProjectView): string {
+function detailsPanel(view: ProjectView, budget: string): string {
   const { project, state } = view;
-  return `<section class="panel">
-  <h2>Details</h2>
-  <dl class="kv">
+  return card(
+    'Run',
+    `<dl class="kv">
+    <dt>Mode</dt><dd>${modeOf(state) === 'power_up' ? 'Power Up' : 'Standard'}</dd>
     <dt>Project ID</dt><dd><button class="copy-inline" type="button" data-copy="${esc(project.id)}" title="Copy project id">${esc(project.id)}</button></dd>
     <dt>Created</dt><dd>${esc(when(project.created_at))}</dd>
     <dt>Updated</dt><dd title="${esc(when(state.updated_at))}">${esc(relative(state.updated_at))}</dd>
-    <dt>Run trace</dt><dd class="truncate" title="${esc(state.trace_id)}">${esc(state.trace_id.slice(0, 12))}</dd>
+    <dt>Trace</dt><dd class="truncate mono" title="${esc(state.trace_id)}">${esc(state.trace_id.slice(0, 14))}</dd>
   </dl>
-</section>`;
+  ${budget}`,
+  );
 }
 
 function secretsPanel(view: ProjectView): string {
   if (!view.secrets.length) {
-    return `<section class="panel"><h2>Secrets</h2><p class="note">None set. Your assistant can request one; the value is entered here or on a one-time link and never reaches the conversation.</p></section>`;
+    return card('Secrets', '<p class="note">None set. Your assistant can request one; you enter the value here or on a one-time link, and it never reaches the conversation.</p>');
   }
-  return `<section class="panel"><h2>Secrets</h2>
-  <ul class="secret-list">${view.secrets
-    .map((s) => `<li><span class="mono">${esc(s.name)}</span><span class="dim">${esc(s.env)}</span></li>`)
-    .join('')}</ul>
-  <p class="note">Values are never shown, here or in the conversation. Only the name and a fingerprint are visible.</p></section>`;
+  return card(
+    'Secrets',
+    `<ul class="secret-list">${view.secrets.map((s) => `<li><span class="mono">${esc(s.name)}</span><span class="dim">${esc(s.env)}</span></li>`).join('')}</ul>
+  <p class="note">Values are never shown, here or in the conversation. Only the name and a fingerprint are visible.</p>`,
+  );
 }
 
 export function projectPage(view: ProjectView, ctx: PageContext): string {
@@ -724,75 +854,70 @@ export function projectPage(view: ProjectView, ctx: PageContext): string {
   const refetches = retriesRemaining(state, 'research_refetch');
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const budget = `<dl class="budget">
-  <div><dt>Plan ${plural(revisions, 'revision', 'revisions')} left</dt><dd>${revisions}</dd></div>
-  <div><dt>${plural(fixes, 'Fix loop', 'Fix loops')} left</dt><dd>${fixes}</dd></div>
-  <div><dt>Research ${plural(refetches, 'refetch', 'refetches')} left</dt><dd>${refetches}</dd></div>
+  <div><dd>${fixes}</dd><dt>${plural(fixes, 'Fix loop', 'Fix loops')} left</dt></div>
+  <div><dd>${revisions}</dd><dt>Plan ${plural(revisions, 'revision', 'revisions')}</dt></div>
+  <div><dd>${refetches}</dd><dt>Research ${plural(refetches, 'refetch', 'refetches')}</dt></div>
 </dl>`;
 
   // At done the live app is the thing to open; the workbench server is
   // yesterday's build and offering both is a way to confuse the two.
   const preview =
     view.previewUrl && state.phase !== 'done'
-      ? `<p class="preview-link"><a class="btn btn-sm" href="${esc(view.previewUrl)}" target="_blank" rel="noreferrer">Open the work in progress</a></p>`
+      ? `<a class="btn" href="${esc(view.previewUrl)}" target="_blank" rel="noreferrer">Preview${icon('external')}</a>`
       : '';
 
-  const unpublish = `<details class="danger">
-  <summary>Take the live app offline</summary>
-  <div class="danger-body">
-    <p>This removes the deployment. Your hosting project, domains, code and history stay as they are. This is not a rollback, and it cannot be undone from here.</p>
-    ${view.approvals.unpublish_confirmed_at
-      ? '<p class="note">Confirmed. Ask your assistant to call <code>unpublish_app</code>.</p>'
-      : `<form class="confirm" method="post" action="/projects/${project.id}/confirm-unpublish">
-      ${view.csrf}
-      <label for="unpublish-confirm">Type <span class="mono">${esc(project.slug)}</span> to confirm</label>
-      <div class="sendback-row">
-        <input id="unpublish-confirm" type="text" name="confirm" autocomplete="off" required placeholder="${esc(project.slug)}">
-        <button class="btn btn-danger" type="submit">Take offline</button>
-      </div>
-    </form>`}
-  </div>
-</details>`;
+  const unpublish = !view.deployments.length ? '' : `<section class="card card-danger">
+  <header class="card-head"><h2>Danger zone</h2></header>
+  <details class="danger">
+    <summary><span><strong>Take the live app offline</strong><span class="note">Removes the deployment. Code, history and your Vercel project stay.</span></span><span class="btn btn-sm btn-danger">Take offline…</span></summary>
+    <div class="danger-body">
+      <p>This removes the deployment. Your hosting project, domains, code and history stay as they are. This is not a rollback, and it cannot be undone from here.</p>
+      ${view.approvals.unpublish_confirmed_at
+        ? '<p class="note">Confirmed. Ask your assistant to call <code>unpublish_app</code>.</p>'
+        : `<form class="confirm" method="post" action="/projects/${project.id}/confirm-unpublish">
+        ${view.csrf}
+        <label for="unpublish-confirm">Type <span class="mono">${esc(project.slug)}</span> to confirm</label>
+        <div class="inline-form">
+          <input id="unpublish-confirm" type="text" name="confirm" autocomplete="off" required placeholder="${esc(project.slug)}">
+          <button class="btn btn-danger" type="submit">Take offline</button>
+        </div>
+      </form>`}
+    </div>
+  </details>
+</section>`;
 
+  const power = modeOf(state) === 'power_up';
   const body = `<nav class="crumb" aria-label="Breadcrumb"><a href="/">Projects</a><span aria-hidden="true">/</span><span aria-current="page">${esc(project.name)}</span></nav>
 <header class="proj-head">
-  <div>
-    <h1>${esc(project.name)}</h1>
-    <p class="meta"><span class="mono">${esc(project.slug)}</span><span aria-hidden="true">·</span><span>Created ${esc(when(project.created_at))}</span><span aria-hidden="true">·</span><span>${esc(phaseLabel(state.phase))}</span></p>
+  <div class="proj-id">
+    <span class="pmark pmark-lg" aria-hidden="true">${esc(initial(project.name))}</span>
+    <div>
+      <div class="proj-title"><h1>${esc(project.name)}</h1><span class="chip" data-tone="${TONE[state.phase]}">${esc(STATUS[state.phase])}</span></div>
+      <p class="meta"><span class="mono">${esc(project.slug)}</span><span aria-hidden="true">·</span><span class="mode-badge" data-on="${power}" title="${power ? 'This run has research, a plan you approve and verification' : 'This run goes straight to the build; you still confirm before it goes live'}">${power ? `${icon('bolt')}Power Up` : 'Standard'}</span><span aria-hidden="true">·</span><span>Created ${esc(when(project.created_at))}</span></p>
+    </div>
   </div>
   <div class="proj-head-actions">
-    <a class="btn btn-sm" href="/projects/${project.id}/settings">Settings</a>
-    <span class="chip chip-lg" data-tone="${TONE[state.phase]}">${esc(STATUS[state.phase])}</span>
+    <a class="btn btn-icon" href="/projects/${project.id}/settings" aria-label="Settings" title="Settings">${icon('gear')}</a>
+    ${preview}
+    ${view.assistantName ? `<a class="btn btn-primary" href="/projects/${project.id}/open">${icon('terminal')}Open in ${esc(view.assistantName)}</a>` : ''}
   </div>
 </header>
+
+<section class="card card-steps">${timeline(state)}</section>
 ${decision(view)}
 ${migrationBlock(view)}
-${preview}
 
 <div class="proj-grid">
   <div class="proj-main">
-    <section>
-      <h2>Progress</h2>
-      ${timeline(state)}
-      ${budget}
-    </section>
-
-    <section>
-      <h2>Checks</h2>
-      ${gates(state)}
-    </section>
-
-    <section>
-      <h2>History</h2>
-      ${historyTable(state)}
-    </section>
-
+    ${card('Checks', gates(state), `<span class="card-sub">${power ? 'Gates this run must pass' : 'Power Up is off, so these are skipped'}</span>`)}
+    ${card('Activity', historyTable(state), `<span class="card-sub">${state.history.length} event${state.history.length === 1 ? '' : 's'}</span>`)}
     ${unpublish}
   </div>
 
   <aside class="side">
     ${livePanel(view)}
     ${servicesPanel(view)}
-    ${detailsPanel(view)}
+    ${detailsPanel(view, budget)}
     ${secretsPanel(view)}
   </aside>
 </div>`;
@@ -802,9 +927,9 @@ ${preview}
 
 export function specPage(view: ProjectView, ctx: PageContext): string {
   const body = `<nav class="crumb" aria-label="Breadcrumb"><a href="/">Projects</a><span aria-hidden="true">/</span><a href="/projects/${view.project.id}">${esc(view.project.name)}</a><span aria-hidden="true">/</span><span aria-current="page">Plan</span></nav>
-<header class="proj-head">
+<header class="page-head">
   <div><h1>Plan</h1><p class="meta"><span class="mono">SPEC.md</span><span aria-hidden="true">·</span><span>${view.spec ? `${view.spec.split('\n').length} lines` : 'not written yet'}</span></p></div>
-  <a class="btn" href="/projects/${view.project.id}">Back to project</a>
+  <div class="page-actions"><a class="btn" href="/projects/${view.project.id}">Back to project</a></div>
 </header>
 ${view.spec ? `<article class="doc"><pre>${esc(view.spec)}</pre></article>` : '<p class="note">No plan has been submitted yet.</p>'}`;
   return shell(ctx, `${view.project.name} plan`, body, 'projects');
@@ -845,44 +970,50 @@ export function settingsPage(view: ProjectView, ctx: PageContext, options: Setti
     <h1>Settings</h1>
     <p class="lede">How this project is named and where it runs. Nothing here changes the code.</p>
   </div>
+  <div class="page-actions"><a class="btn" href="/projects/${project.id}">Back to project</a></div>
 </header>
 
 <div class="settings-grid">
-  <section class="panel settings-card">
-    <h2>Name</h2>
-    <form class="settings-form" method="post" action="/projects/${project.id}/rename">
+  ${card(
+    'General',
+    `<form class="settings-form" method="post" action="/projects/${project.id}/rename">
       ${view.csrf}
       <label for="name">Project name</label>
-      <div class="settings-row">
+      <div class="inline-form">
         <input id="name" name="name" type="text" value="${esc(project.name)}" maxlength="80" required autocomplete="off">
         <button class="btn btn-primary" type="submit">Save</button>
       </div>
-      ${options.saved ? '<p class="saved" role="status">Saved.</p>' : ''}
+      ${options.saved ? `<p class="saved" role="status">${icon('check')}Saved.</p>` : ''}
       ${options.error ? `<p class="error" role="alert">${esc(options.error)}</p>` : ''}
       <p class="note">The slug <span class="mono">${esc(project.slug)}</span> stays the same. Publish, unpublish and data-change confirmations ask you to type it, so it must not move under you.</p>
-    </form>
-  </section>
-
-  <section class="panel settings-card">
-    <h2>Project</h2>
-    <dl class="kv">
+    </form>`,
+  )}
+  ${card(
+    'Project',
+    `<dl class="kv">
       <dt>Project ID</dt><dd><button class="copy-inline" type="button" data-copy="${esc(project.id)}">${esc(project.id)}</button></dd>
+      <dt>Slug</dt><dd class="mono">${esc(project.slug)}</dd>
       <dt>Created</dt><dd>${esc(when(project.created_at))}</dd>
-      <dt>Run trace</dt><dd class="truncate" title="${esc(view.state.trace_id)}">${esc(view.state.trace_id.slice(0, 12))}</dd>
+      <dt>Trace</dt><dd class="truncate mono" title="${esc(view.state.trace_id)}">${esc(view.state.trace_id.slice(0, 14))}</dd>
       <dt>Database</dt><dd>${esc(view.dbLabel)}</dd>
       <dt>Hosting</dt><dd>${esc(view.deployerLabel)}</dd>
       <dt>Secrets</dt><dd>${view.secrets.length}</dd>
-    </dl>
-  </section>
-</div>
-
-<p class="settings-back"><a class="btn btn-sm" href="/projects/${project.id}">Back to project</a></p>`;
+    </dl>`,
+  )}
+</div>`;
   return shell(ctx, `${project.name} settings`, body, 'projects');
 }
 
 // ----------------------------------------------------------------- connect
 
-export function connectPage(ctx: PageContext): string {
+export interface ConnectedAssistant {
+  label: string;
+  token_hash: string;
+  created_at: Date;
+  last_used_at: Date | null;
+}
+
+export function connectPage(ctx: PageContext, assistants: { list: ConnectedAssistant[]; csrf: string; names: Record<string, string> } = { list: [], csrf: '', names: {} }): string {
   const endpoint = `${ctx.baseUrl}/mcp`;
   const free = TOOLS.filter((t) => !t.metered).length;
   const total = TOOLS.length;
@@ -891,53 +1022,69 @@ export function connectPage(ctx: PageContext): string {
     (t) => `<li><span class="tool-name mono">${esc(t.name)}</span><span class="tool-title">${esc(t.title)}</span><span class="tool-meta">${t.metered ? 'build action' : 'free'}${t.read_only ? ' · reads' : ''}${t.destructive ? ' · destructive' : ''}</span><span class="tool-desc">${esc(t.summary)}</span></li>`,
   ).join('');
 
-  const body = `<header class="hero">
-  <p class="eyebrow">Connect</p>
-  <div class="hero-row">
-    <div>
-      <h1>Connect an assistant</h1>
-      <p class="lede">Power is an MCP server. Point a client at the endpoint below and sign in with this account. Nothing is installed on this machine, and no API key is involved.</p>
-    </div>
-    <div class="hero-meta">
-      <span class="meta-pill"><span class="pulse" aria-hidden="true"></span><b>${total}</b> tools ready</span>
-    </div>
+  const connected = assistants.list.length
+    ? `<ul class="tokens">${assistants.list
+        .map(
+          (a) => `<li><span class="token-mark">${icon('terminal')}</span><span class="token-body"><strong>${esc(assistants.names[a.label] ?? a.label)}</strong><span class="dim">Set up ${esc(relative(a.created_at.toISOString()))}${a.last_used_at ? ` · last used ${esc(relative(a.last_used_at.toISOString()))}` : ' · not used yet'}</span></span>
+<form method="post" action="/start/revoke">${assistants.csrf}<input type="hidden" name="token" value="${esc(a.token_hash)}"><button class="btn btn-sm btn-danger" type="submit">Revoke</button></form></li>`,
+        )
+        .join('')}</ul>
+<p class="note">Each holds its own token. Revoking one disconnects that tool immediately.</p>`
+    : `<div class="empty empty-inline"><p>No assistant connected yet. Start a <a class="text-link" href="/?new=1">New app</a> and Power connects Claude Code, Cursor or Codex for you in one step.</p></div>`;
+
+  const body = `<header class="page-head">
+  <div>
+    <h1>Connect</h1>
+    <p class="lede">Power is an MCP server. Point a client at the endpoint and sign in with this account. Nothing is installed here, and no API key is involved.</p>
   </div>
+  <div class="page-actions"><a class="btn btn-primary" href="/?new=1">${icon('plus')}New app</a></div>
 </header>
 
-<section class="field">
-  <span class="field-label">Endpoint</span>
-  <div class="copyline">
+<div class="connect-grid">
+  <div class="proj-main">
+    ${card(
+      'Endpoint',
+      `<div class="copyline">
     <code>${esc(endpoint)}</code>
-    <button class="btn" type="button" data-copy="${esc(endpoint)}">Copy</button>
+    <button class="btn btn-sm" type="button" data-copy="${esc(endpoint)}">${icon('copy')}Copy</button>
   </div>
   <dl class="specs">
     <div><dt>Transport</dt><dd>Streamable HTTP</dd></div>
     <div><dt>Authorization</dt><dd>OAuth 2.1 with PKCE</dd></div>
     <div><dt>Resource metadata</dt><dd class="mono">/.well-known/oauth-protected-resource</dd></div>
-  </dl>
-</section>
-
-<section>
-  <h2>Claude Code</h2>
-  <div class="copyline code-line">
+  </dl>`,
+      `<span class="chip" data-tone="live">${total} tools ready</span>`,
+    )}
+    ${card('Connected assistants', connected, `<span class="card-sub">${assistants.list.length} connected</span>`)}
+    ${card(
+      'Claude Code',
+      `<p class="card-text">One command adds Power; Claude Code opens a sign-in page the first time it calls a tool.</p>
+  <div class="copyline">
     <code>claude mcp add --transport http power ${esc(endpoint)}</code>
-    <button class="btn" type="button" data-copy="claude mcp add --transport http power ${esc(endpoint)}">Copy</button>
+    <button class="btn btn-sm" type="button" data-copy="claude mcp add --transport http power ${esc(endpoint)}">${icon('copy')}Copy</button>
+  </div>`,
+    )}
+    ${card(
+      'Any MCP client',
+      `<p class="card-text">Add a remote MCP server with the endpoint above. The client reads the resource metadata, discovers this server as its own authorization server, and opens a sign-in page. Afterwards it holds a token scoped to this server only.</p>`,
+    )}
   </div>
-</section>
-
-<section>
-  <h2>Any MCP client</h2>
-  <p>Add a remote MCP server with the endpoint above. The client reads the resource metadata, discovers this server as its own authorization server, and opens a sign-in page. Afterwards the client holds a token scoped to this server only.</p>
-</section>
-
-<section>
-  <h2>What it can do</h2>
-  <p>${total} tools, ${free} of them free. Reads and exports never count against the daily allowance; build actions do.</p>
+  <aside class="side">
+    ${card(
+      'Hosting',
+      `<p class="card-text">Apps publish to your own Vercel account, so you own the project, the domain and the bill.</p>
+  <div class="card-actions"><a class="btn btn-sm" href="/start/vercel">${icon('globe')}Manage Vercel</a></div>`,
+    )}
+    ${card(
+      'What it can do',
+      `<p class="card-text">${total} tools, ${free} of them free. Reads and exports never count against the daily allowance; build actions do.</p>
   <details class="tool-list-wrap">
     <summary>Show every tool</summary>
     <ul class="tool-list">${tools}</ul>
-  </details>
-</section>`;
+  </details>`,
+    )}
+  </aside>
+</div>`;
 
   return shell(ctx, 'Connect', body, 'connect');
 }
@@ -983,6 +1130,6 @@ export function renderMessagePage(title: string, message: string): string {
 // ---------------------------------------------------------------------- css
 
 /** The brand mark, in the one place a browser can fetch it. */
-export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 709 741"><path d="${MARK_PATH}" fill="#0b0c0e"/></svg>`;
+export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 709 741"><path d="${MARK_PATH}" fill="#fff3f0"/></svg>`;
 
 export { DASHBOARD_CSS } from './app-css.js';

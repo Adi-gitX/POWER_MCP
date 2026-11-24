@@ -5,8 +5,6 @@
       "name": "power-app",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
-        "--dir",
-        "/Users/kammatiaditya/Downloads/POWER_MCP-main",
         "dev:vercel"
       ],
       "port": 4321
@@ -15,8 +13,6 @@
       "name": "power-site",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
-        "--dir",
-        "/Users/kammatiaditya/Downloads/POWER_MCP-main",
         "dev:site"
       ],
       "port": 4000

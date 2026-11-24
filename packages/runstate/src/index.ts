@@ -43,6 +43,24 @@ export type FeedbackEdge = (typeof FEEDBACK_EDGES)[number];
  */
 export type GateStatus = 'pending' | 'pass' | 'fail' | 'skipped';
 
+/**
+ * How much process a run carries.
+ *
+ *   • `standard` — the default. Straight to the build; the implementer's own
+ *     checks must be green, and a person still confirms before anything goes
+ *     live. Research, the plan and verification are recorded as skipped.
+ *   • `power_up` — the full pipeline: sourced research, a plan the person
+ *     approves, and independent verification before publishing.
+ *
+ * Fixed when the run starts, so a run cannot drop its gates halfway through.
+ */
+export type RunMode = 'standard' | 'power_up';
+
+/** Runs stored before modes existed went through every gate, so they read as `power_up`. */
+export function modeOf(state: Pick<RunState, 'mode'>): RunMode {
+  return state.mode ?? 'power_up';
+}
+
 export interface TransitionRecord {
   at: string;
   from: Phase;
@@ -56,6 +74,8 @@ export interface RunState {
   version: 1;
   /** Correlates every tool call, gate call, and log line for one run. */
   trace_id: string;
+  /** Absent on runs from before modes existed; see `modeOf`. */
+  mode?: RunMode;
   phase: Phase;
   loops: Record<FeedbackEdge, number>;
   gates: Record<Stage, GateStatus>;
@@ -85,11 +105,12 @@ export interface Clock {
 
 export const systemClock: Clock = { now: () => new Date().toISOString() };
 
-export function createRunState(traceId: string, clock: Clock = systemClock): RunState {
+export function createRunState(traceId: string, clock: Clock = systemClock, mode: RunMode = 'power_up'): RunState {
   const at = clock.now();
   return {
     version: 1,
     trace_id: traceId,
+    mode,
     phase: 'intake',
     loops: { research_refetch: 0, spec_revision: 0, needs_fixes: 0 },
     gates: { research: 'pending', spec: 'pending', verification: 'pending' },
@@ -111,6 +132,8 @@ export function createRunState(traceId: string, clock: Clock = systemClock): Run
 export type RunEvent =
   | { type: 'start_research' }
   | { type: 'research_skipped' }
+  /** Standard mode only: straight from intake to the build. */
+  | { type: 'fast_track' }
   | { type: 'gate_result'; stage: Stage; result: GateResult }
   | { type: 'checkpoint_acknowledged' }
   | { type: 'spec_approved' }
@@ -130,6 +153,16 @@ const RETRY_TARGET: Record<FeedbackEdge, Phase> = {
   spec_revision: 'spec',
   needs_fixes: 'build',
 };
+
+/**
+ * The two extra moves a standard run makes, and only through the event that
+ * checks the mode: `fast_track` (intake -> build) and `published` (build ->
+ * done). They are not in ALLOWED, so no other event can take them.
+ */
+const STANDARD_ONLY: ReadonlyArray<readonly [Phase, Phase, RunEvent['type']]> = [
+  ['intake', 'build', 'fast_track'],
+  ['build', 'done', 'published'],
+];
 
 /** Legal `phase -> phase` moves, so a bug cannot silently skip the approval gate. */
 const ALLOWED: Record<Phase, readonly Phase[]> = {
@@ -151,7 +184,9 @@ function transition(
   clock: Clock,
   note?: string,
 ): RunState {
-  if (state.phase !== to && !ALLOWED[state.phase].includes(to)) {
+  const standardMove =
+    modeOf(state) === 'standard' && STANDARD_ONLY.some(([from, dest, via]) => from === state.phase && dest === to && via === event);
+  if (state.phase !== to && !standardMove && !ALLOWED[state.phase].includes(to)) {
     throw new StateError(
       `illegal transition ${state.phase} -> ${to} (event: ${event}). ` +
         `Allowed from ${state.phase}: ${ALLOWED[state.phase].join(', ') || 'none'}.`,
@@ -189,6 +224,18 @@ export function apply(state: RunState, event: RunEvent, clock: Clock = systemClo
         gates: { ...state.gates, research: 'skipped' },
       };
       return transition(next, 'spec', event.type, clock, 'research skipped by run options');
+    }
+
+    case 'fast_track': {
+      if (modeOf(state) !== 'standard') {
+        throw new StateError('a Power Up run goes through research, the plan and verification; it cannot fast-track');
+      }
+      // Recorded as skipped, never as passed: the record says nobody ran them.
+      const next: RunState = {
+        ...state,
+        gates: { research: 'skipped', spec: 'skipped', verification: 'skipped' },
+      };
+      return transition(next, 'build', event.type, clock, 'Power Up off: straight to the build');
     }
 
     case 'gate_result': {
@@ -264,6 +311,9 @@ export function apply(state: RunState, event: RunEvent, clock: Clock = systemClo
       if (!decision.allowed) {
         throw new StateError(`cannot mark published: ${decision.missing.join('; ')}`);
       }
+      if (modeOf(state) === 'power_up' && state.phase !== 'verify') {
+        throw new StateError('a Power Up run publishes from verification, not from the build');
+      }
       return transition(state, 'done', event.type, clock);
     }
 
@@ -301,6 +351,12 @@ export interface PublishDecision {
  */
 export function canPublish(state: RunState): PublishDecision {
   const missing: string[] = [];
+  if (modeOf(state) === 'standard') {
+    // No plan or verification stage was chosen, so the build's own checks are
+    // the condition. The person's confirmation is still required by the guard.
+    if (!state.self_verify_green) missing.push("the implementer's own checks are not green");
+    return { allowed: missing.length === 0, missing };
+  }
   if (!state.approved_spec) missing.push('the spec has not been approved by a human');
   if (!state.self_verify_green) missing.push("the implementer's own checks are not green");
   if (state.gates.verification !== 'pass') {

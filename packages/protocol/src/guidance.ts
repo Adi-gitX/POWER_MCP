@@ -21,6 +21,7 @@ import {
   retriesRemaining,
   type FeedbackEdge,
   type RunState,
+  modeOf,
 } from '@power/runstate';
 import type { ContextBlock, NextAction } from './envelope.js';
 
@@ -78,6 +79,13 @@ export function nextAction(state: RunState): NextAction | null {
       };
 
     case 'build':
+      if (modeOf(state) === 'standard') {
+        // No verification stage in a standard run: green checks are the
+        // condition, and the person confirms before it goes live.
+        return state.self_verify_green
+          ? { tool: 'publish_app', args: {}, why: 'The build is green. Publish it; the person confirms in their browser first.' }
+          : { tool: 'run_tests', args: {}, why: 'Typecheck and test. A green build is what publishing needs.' };
+      }
       // Self-verification is the implementer's own gate on itself, and it is a
       // publish condition. Until it is green, more editing is not the next step.
       return state.self_verify_green
@@ -110,7 +118,7 @@ export function nextAction(state: RunState): NextAction | null {
       return {
         tool: 'start_run',
         args: { goal: '<what to build or change next>' },
-        why: 'This run shipped. Further changes begin a new run, planned and verified like the first.',
+        why: 'This run shipped. Further changes begin a new run.',
       };
 
     case 'blocked':
@@ -155,6 +163,7 @@ export function buildContext(args: {
     run_id: state.trace_id,
     phase: state.phase,
     phase_label: phaseLabel(state.phase),
+    mode: modeOf(state),
     env,
     open_gate_failures: openFailures(state, lastErrors),
     loops_remaining: loopsRemaining(state),

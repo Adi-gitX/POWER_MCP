@@ -21,9 +21,36 @@ const json = (body: unknown, status = 200) =>
 
 describe('project names', () => {
   it('are derived from the slug and always valid', () => {
-    expect(deployProjectName('My Barber Shop!')).toBe('my-barber-shop');
-    expect(deployProjectName('---')).toBe('power-app');
-    expect(deployProjectName('a'.repeat(200))).toHaveLength(100);
+    expect(deployProjectName('My Barber Shop!', '5b9012cc0e')).toBe('power-my-barber-shop-5b9012');
+    expect(deployProjectName('---', 'ab12cd34ef')).toBe('power-app-ab12cd');
+    const long = deployProjectName('a'.repeat(200), 'ab12cd34ef');
+    expect(long.length).toBeLessThanOrEqual(100);
+    expect(long).toMatch(/^power-a+-ab12cd$/);
+    expect(deployProjectName('x', 'ab12cd34ef')).toMatch(/^[a-z0-9-]+$/);
+  });
+
+  it('never give two Power apps, or a Power app and an unrelated project, the same name', () => {
+    // The bare slug was the name before, so an app called "site" deployed into
+    // whatever Vercel project of that name the account already had.
+    expect(deployProjectName('site', 'aaaaaa1111')).not.toBe('site');
+    expect(deployProjectName('site', 'aaaaaa1111')).not.toBe(deployProjectName('site', 'bbbbbb2222'));
+  });
+});
+
+describe('checking for an existing hosting project', () => {
+  it('reads a 404 as free and a 200 as taken, scoped to the team', async () => {
+    const free = stubFetch(() => json({ error: { code: 'not_found' } }, 404));
+    expect(await new VercelDeployer(free.impl).projectExists('power-shop-ab12cd', { token: 't', teamId: 'team_1' })).toBe(false);
+    expect(free.calls[0]!.url.pathname).toBe('/v9/projects/power-shop-ab12cd');
+    expect(free.calls[0]!.url.searchParams.get('teamId')).toBe('team_1');
+
+    const taken = stubFetch(() => json({ id: 'prj_1', name: 'site' }));
+    expect(await new VercelDeployer(taken.impl).projectExists('site', CRED)).toBe(true);
+  });
+
+  it('does not guess when it cannot tell', async () => {
+    const denied = stubFetch(() => json({ error: { code: 'forbidden', message: 'no' } }, 403));
+    await expect(new VercelDeployer(denied.impl).projectExists('site', CRED)).rejects.toBeInstanceOf(DeployError);
   });
 });
 

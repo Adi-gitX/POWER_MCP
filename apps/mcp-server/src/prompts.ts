@@ -13,19 +13,48 @@ import { REQUIRED_SECTIONS } from '@power/gates';
 /** Always in the client's context. The one prompt surface we fully control. */
 export const SERVER_INSTRUCTIONS = `Power builds and hosts full-stack apps. You do the thinking; Power provides the workbench, checks the work, and ships it.
 
-Every project runs through a short pipeline whose gates are enforced by code, not by you:
-  plan (submit_spec) → human approves → build (write files, run_tests until green) → verify (submit_verification) → publish_app
+Every project runs in one of two modes, fixed when the run starts and shown in every "context" block as "mode":
+  standard (the default):  build (write files, run_tests until green) → the user confirms → publish_app
+  power_up (opt-in):       research (submit_research) → plan (submit_spec) → user approves → build → verify (submit_verification) → the user confirms → publish_app
+
+Use power_up only when the user asks for it ("Power Up", "plan it first", "research and verify this"): pass power_up: true to create_project or start_run. Otherwise leave it out and the account's own setting applies.
 
 Rules that make this go smoothly:
 - Every response includes a "context" block with the current phase and a "next_action". Follow next_action. If you are ever unsure, call get_next_action.
 - A response with ok:false is not an error. It is the gate telling you exactly what to fix, in "failures", and what to call next. Fix the listed failures and resubmit. Refusals are never billed.
 - Reads are free. Look before you edit.
 - You cannot approve your own plan or confirm a publish; only the user can, in their browser. When told to wait for the user, tell them what to do and stop.
-- The assistant never touches the live app or its data directly. Only publish_app does, after verification passes.`;
+- The assistant never touches the live app or its data directly. Only publish_app does, once its conditions hold and the user has confirmed.`;
 
 const sectionList = REQUIRED_SECTIONS.map((s) => `## ${title(s)}`).join('\n');
 
 export const ROLE_BRIEFS = {
+  researcher: `You are now acting as the RESEARCHER. This is a Power Up run: before any plan, find out what the plan needs to know, and source every claim.
+
+Submit research.json with submit_research. The research gate checks exactly this:
+- summary: what you learned, in a few sentences (40+ characters).
+- unknowns_resolved: each open question, its answer, whether it is resolved, and a source_url for the answer.
+- prior_art: existing products or libraries — name, url, and the gaps this app fills.
+- users.pain_points: real problems, each with a severity and a source_url.
+- feasibility.constraints: limits the build must respect, each with its impact and a source_url.
+- sources: every url you cite anywhere above, each with a tier (primary, secondary or vendor).
+
+Cite only pages you actually read. A claim without a source is a failing rule, not a style note. When it passes, the run moves to the plan.`,
+
+  builder: `You are now acting as the BUILDER. This is a standard run: no separate plan or verification stage, so the build is the whole job and the checks are the gate.
+
+- Read the existing files first (reads are free), then build what the user asked for, exactly — no more.
+- Write code with write_file / edit_file, and tests alongside it: run_tests must report green before anything can be published.
+- Run run_tests. It typechecks and tests together. Fix everything it reports until it says green.
+- When it is green, tell the user it is ready and call publish_app. It asks them to confirm in their browser; you cannot confirm for them.
+
+Rules that have no exception on this run:
+- Never rewrite a file to change part of it. read_file, then edit_file.
+- Never put a secret, key or token in code, tests or logs. Use request_secret; your code reads process.env.
+- Never weaken, skip or delete a test to make the suite pass.
+- Never leave a stub or fake-data path in anything you report as complete.
+- If the user wants a plan, research or independent verification first, start the run with power_up: true instead.`,
+
   architect: `You are now acting as the ARCHITECT. Write SPEC.md — the plan the user will approve and the build will be checked against.
 
 The spec gate is deterministic. It checks exactly this:
@@ -101,6 +130,27 @@ Read the code, run the tests, and exercise the behaviour each requirement descri
 } as const;
 
 export type Role = keyof typeof ROLE_BRIEFS;
+
+/** A research.json skeleton that satisfies the gate's shape; the content is the researcher's job. */
+export function researchTemplate(product: string): string {
+  const doc = 'https://example.com/docs';
+  const rival = 'https://example.com/product';
+  return JSON.stringify(
+    {
+      summary: `What building ${product} requires, what already exists, and what remains open.`,
+      unknowns_resolved: [{ question: 'An open question the plan depends on?', answer: 'The answer, from a page you read.', resolved: true, source_url: doc }],
+      prior_art: [{ name: 'An existing product', url: rival, strengths: ['What it does well'], gaps: ['What this app does that it does not'] }],
+      users: { pain_points: [{ point: 'A real problem the people using it have', severity: 'high', source_url: rival }] },
+      feasibility: { constraints: [{ constraint: 'A limit the build has to respect', impact: 'What it changes in the plan', source_url: doc }] },
+      sources: [
+        { url: doc, tier: 'primary', title: 'The documentation you read' },
+        { url: rival, tier: 'vendor', title: 'The product page you read' },
+      ],
+    },
+    null,
+    2,
+  );
+}
 
 export function specTemplate(product: string): string {
   const body = REQUIRED_SECTIONS.map((section) => {

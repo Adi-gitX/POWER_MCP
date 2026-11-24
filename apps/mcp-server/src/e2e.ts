@@ -8,6 +8,7 @@
  * they do with `ok: false`. Run with the server up: `pnpm e2e`.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { researchTemplate } from './prompts.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const BASE = process.env.POWER_BASE_URL ?? 'http://localhost:4321';
@@ -22,6 +23,7 @@ interface Envelope {
   guidance?: string;
   context?: {
     phase: string;
+    mode?: string;
     next_action: { tool: string } | null;
     open_gate_failures: unknown[];
     loops_remaining: Record<string, number>;
@@ -191,9 +193,11 @@ step('tool list is published', tools.tools.length >= 25, tools.tools.length);
 step('no execute_sql anywhere', !tools.tools.some((t) => t.name === 'execute_sql'));
 
 console.log('\n— plan');
-const created = await call('create_project', { name: 'Bakery greeter' });
-step('create_project starts at the plan', created.ok && created.context?.phase === 'spec', created);
-step('create_project hands over the architect brief', Boolean(created.guidance?.includes('ARCHITECT')));
+// This walk-through is the full gated pipeline, so it asks for Power Up.
+// The default, standard flow has its own walk-through at the end.
+const created = await call('create_project', { name: 'Bakery greeter', power_up: true });
+step('a Power Up project starts with research', created.ok && created.context?.phase === 'research' && created.context?.mode === 'power_up', created.context);
+step('  …and hands over the researcher brief', Boolean(created.guidance?.includes('RESEARCHER')));
 const pid = created.data?.project_id as string;
 // Baseline the quota here, so the metering assertion at the end measures what
 // THIS run spent. Asserting an absolute number only held against a freshly
@@ -202,10 +206,16 @@ const quotaBefore =
   ((await call('get_context', { project_id: pid })).data?.quota as { day: number } | undefined)?.day ?? null;
 
 const early = await call('write_file', { project_id: pid, path: 'src/x.ts', content: 'x' });
-step('writing before a plan is refused, not errored', early.ok === false && !early.isError, early);
+step('writing before research and a plan is refused, not errored', early.ok === false && !early.isError, early);
 step('  …with reason wrong_phase', early.reason === 'wrong_phase');
-step('  …and points at submit_spec', early.context?.next_action?.tool === 'submit_spec');
+step('  …and points at submit_research', early.context?.next_action?.tool === 'submit_research');
 step('  …and is not billed', early.billed === false);
+
+const unsourced = await call('submit_research', { project_id: pid, research: JSON.stringify({ summary: 'too short' }) });
+step('unsourced research is refused by the research gate', unsourced.ok === false && unsourced.reason === 'gate_not_satisfied', unsourced.reason);
+const researched = await call('submit_research', { project_id: pid, research: researchTemplate('Bakery greeter') });
+step('sourced research passes and moves the run to the plan', researched.ok && researched.context?.phase === 'spec', researched.context);
+step('  …and hands over the architect brief', Boolean(researched.guidance?.includes('ARCHITECT')));
 
 const bad = await call('submit_spec', { project_id: pid, spec: '# Just a heading' });
 step('a bad spec is refused by the gate', bad.ok === false && bad.reason === 'gate_not_satisfied' && !bad.isError, bad);
@@ -473,13 +483,35 @@ step('  …a button-press is not enough; the name has to be typed', takedownButt
 console.log('\n— the second hour: a new run on a shipped project');
 const staleWrite = await call('write_file', { project_id: pid, path: 'src/z.ts', content: 'z' });
 step('a done run refuses new building and points at start_run', staleWrite.ok === false && staleWrite.context?.next_action?.tool === 'start_run', staleWrite.context?.next_action);
-const run2 = await call('start_run', { project_id: pid, goal: 'Add a whisper() function that lower-cases the greeting.' });
-step('start_run begins a new run at the plan, keeping the project', run2.ok && run2.context?.phase === 'spec' && run2.data?.previous_run !== run2.data?.run_id, run2);
+const run2 = await call('start_run', { project_id: pid, goal: 'Add a whisper() function that lower-cases the greeting.', power_up: true });
+step('a Power Up start_run begins a new run at research, keeping the project', run2.ok && run2.context?.phase === 'research' && run2.data?.previous_run !== run2.data?.run_id, run2.context);
 step('  …with a fresh retry budget', run2.context?.loops_remaining.needs_fixes === 2 && run2.context?.loops_remaining.spec_revision === 2, run2.context?.loops_remaining);
 step('  …the previous plan is offered as context', Boolean(run2.guidance?.includes('previous SPEC.md')));
 step('  …and live is untouched', (run2.data?.live as { version: string }).version === 'v1', run2.data?.live);
 const run2Write = await call('write_file', { project_id: pid, path: 'src/z.ts', content: 'z' });
 step('  …and the gates are re-armed: writing before the new plan is refused', run2Write.ok === false && run2Write.reason === 'wrong_phase');
+
+console.log('\n— the default: Power Up off');
+const quick = await call('create_project', { name: 'Quick tipper' });
+const qid = String(quick.data?.project_id);
+step('a project without Power Up starts in the build', quick.ok && quick.context?.phase === 'build' && quick.context?.mode === 'standard', quick.context);
+step('  …and hands over the builder brief, not the architect', Boolean(quick.guidance?.includes('BUILDER')) && !quick.guidance?.includes('ARCHITECT'));
+const qw1 = await call('write_file', { project_id: qid, path: 'src/tip.ts', content: APP });
+const qw2 = await call('write_file', { project_id: qid, path: 'src/tip.test.ts', content: TEST });
+step('  …so writing works straight away', qw1.ok && qw2.ok, qw1.reason);
+const qEarly = await call('publish_app', { project_id: qid });
+step('publishing before the checks are green is refused', qEarly.ok === false && /checks are not green/.test(qEarly.message ?? ''), qEarly.message);
+const qGreen = await call('run_tests', { project_id: qid });
+step('green tests keep the run in the build, ready to publish', qGreen.ok && qGreen.data?.green === true && qGreen.context?.phase === 'build', qGreen.context?.phase);
+step('  …and the next action is publish_app', qGreen.context?.next_action?.tool === 'publish_app', qGreen.context?.next_action);
+const qUnconfirmed = await call('publish_app', { project_id: qid });
+step('the person still confirms before anything goes live', qUnconfirmed.ok === false && qUnconfirmed.reason === 'needs_user_input', qUnconfirmed.reason);
+step('confirm-publish accepts a standard run', (await submit(qid, 'confirm-publish')) === 303);
+const qPublished = await call('publish_app', { project_id: qid });
+step('a standard run publishes and is done', qPublished.ok && qPublished.context?.phase === 'done', qPublished.context?.phase);
+const qState = await call('get_context', { project_id: qid });
+const qGates = qState.data?.gates as Record<string, string> | undefined;
+step('  …with research, plan and verification recorded as skipped, not passed', qGates?.research === 'skipped' && qGates?.spec === 'skipped' && qGates?.verification === 'skipped', qGates);
 
 console.log('\n— the exit');
 const exported = await call('export_project', { project_id: pid });

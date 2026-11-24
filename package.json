@@ -19,11 +19,10 @@
     "e2e": "pnpm --filter @power/mcp-server e2e",
     "build:site": "pnpm --filter @power/site build",
     "dev:site": "pnpm --filter @power/site dev",
-    "visual": "node scripts/visual-pass.mjs"
+    "dev:vercel": "pnpm --filter @power/mcp-server dev:vercel"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "playwright-core": "^1.51.1",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   }

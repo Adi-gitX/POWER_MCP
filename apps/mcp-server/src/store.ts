@@ -41,7 +41,7 @@ export interface Approvals {
   unpublish_confirmed_at: string | null;
 }
 
-export type ArtifactName = 'SPEC.md' | 'verification.json' | 'research.json' | 'migration.json';
+export type ArtifactName = 'SPEC.md' | 'verification.json' | 'research.json' | 'migration.json' | 'BRIEF.md';
 
 export interface Store {
   createProject(project: Project, state: RunState): Promise<void>;

@@ -23,7 +23,10 @@ export const OAUTH_TABLES = [
   'oauth_refresh_tokens',
   'browser_sessions',
   'login_challenges',
+  'login_codes',
   'oauth_login_flows',
+  'connection_tokens',
+  'setup_codes',
 ] as const;
 
 export const OAUTH_SCHEMA_SQL = `
@@ -139,6 +142,26 @@ create table if not exists login_challenges (
 );
 create index if not exists login_challenges_email on login_challenges (email);
 
+-- One-time sign-in codes. The browser holds a random challenge id in a
+-- cookie; the code is checked against sha256(id:code), so neither the code
+-- nor anything that would reproduce it is stored. Each send replaces the
+-- code, and the link sent alongside it (link_hash) is consumed with it.
+create table if not exists login_codes (
+  id_hash text primary key,
+  email text not null,
+  code_hash text not null,
+  link_hash text,
+  next text not null default '/',
+  attempts int not null default 0,
+  sends int not null default 1,
+  last_sent_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  ip text
+);
+create index if not exists login_codes_email on login_codes (email, created_at);
+
 -- One row per trip to Google. The state is hashed like every other bearer
 -- value; the verifier and nonce live only here, server-side, and the row is
 -- spent exactly once so a replayed callback cannot sign anyone in.
@@ -150,5 +173,29 @@ create table if not exists oauth_login_flows (
   created_at timestamptz not null default now(),
   expires_at timestamptz not null,
   consumed_at timestamptz
+);
+
+-- Long-lived credentials an assistant's MCP config carries, minted by the
+-- setup installer so a tool is connected to the right account without an
+-- OAuth round trip. Hashed like every other bearer value here; revocable.
+create table if not exists connection_tokens (
+  token_hash text primary key,
+  user_id text not null references users(id) on delete cascade,
+  label text not null,
+  created_at timestamptz not null default now(),
+  last_used_at timestamptz,
+  revoked_at timestamptz
+);
+create index if not exists connection_tokens_user on connection_tokens (user_id);
+
+-- One-time codes baked into a setup command. A code fetches the installer
+-- and is exchanged exactly once for a connection token, inside its window.
+create table if not exists setup_codes (
+  code_hash text primary key,
+  user_id text not null references users(id) on delete cascade,
+  platform text not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  exchanged_at timestamptz
 );
 `;

@@ -1,0 +1,9 @@
+/* Only what the OtpInput component uses, for the server's sign-in page.
+   No preflight: the page has its own base styles. Unlayered utilities, so
+   they win over the page's generic form rules. Dark mode is the class on the
+   mount point, because these pages are always dark whatever the OS says. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css";
+@custom-variant dark (&:where(.dark, .dark *));
+@source "../components/ui/otp-input.tsx";
+@source "./otp-mount.tsx";

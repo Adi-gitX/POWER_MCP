@@ -40,6 +40,9 @@ jobs:
       - run: pnpm build:site
         env:
           SITE_URL: ${{ vars.SITE_URL }}
+          # The public site links to the hosted app. Without this the build
+          # links to http://localhost:4321, which is right for local builds.
+          NEXT_PUBLIC_POWER_APP_URL: ${{ vars.POWER_APP_URL || 'https://app.usepower.dev' }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

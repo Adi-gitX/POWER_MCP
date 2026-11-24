@@ -29,7 +29,7 @@
  * around the guard, because a refusal must never be billed and the reservation
  * has to be released when the guard says no.
  */
-import { canPublish, type RunState } from '@power/runstate';
+import { canPublish, modeOf, type RunState } from '@power/runstate';
 import type { ContextBlock, RefusalResponse } from './envelope.js';
 import { refuse } from './envelope.js';
 import { isLegalInPhase, lookupTool, type ToolSpec } from './tools.js';
@@ -107,7 +107,7 @@ export function guard(input: GuardInput): GuardVerdict {
       return {
         allowed: false,
         refusal: refuse(
-          state.approved_spec ? 'gate_not_satisfied' : 'awaiting_human_approval',
+          modeOf(state) === 'standard' || state.approved_spec ? 'gate_not_satisfied' : 'awaiting_human_approval',
           `Not ready to publish: ${decision.missing.join('; ')}.`,
           context,
           { gate: 'verification' },

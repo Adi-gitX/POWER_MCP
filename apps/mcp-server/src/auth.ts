@@ -45,12 +45,27 @@ function bearer(req: IncomingMessage): string | null {
  * rejected OAuth token would quietly fall through and succeed as the dev user,
  * which hides exactly the failures a developer is trying to see — a revoked
  * token would appear to still work.
+ *
+ * It also declines a person loading a dashboard page in a browser. Those have
+ * a real sign-in a click away, and answering them as the dev user meant the
+ * site's "Workspace" link skipped sign-up entirely and signing out appeared
+ * to do nothing: the next page load was quietly someone else's account. A
+ * declined page load falls through to the `/login?next=` redirect. MCP and
+ * API calls, and project previews opened from a dev-auth MCP client, are
+ * still the dev user.
  */
 export class DevAuthenticator implements Authenticator {
   async authenticate(req: IncomingMessage): Promise<Principal | null> {
     if (req.headers.authorization) return null;
+    if (isDashboardPageLoad(req)) return null;
     return DEV_USER;
   }
+}
+
+function isDashboardPageLoad(req: IncomingMessage): boolean {
+  if (req.method !== 'GET' || !(req.headers.accept ?? '').includes('text/html')) return false;
+  const path = (req.url ?? '/').split('?')[0]!;
+  return path !== '/mcp' && !path.startsWith('/preview/');
 }
 
 /**
@@ -168,6 +183,30 @@ export class OAuthAuthenticator implements Authenticator {
   }
 }
 
+/** The prefix every connection token carries, so it is recognisable in a config file and in a leak scan. */
+export const CONNECTION_TOKEN_PREFIX = 'pwr_';
+
+/**
+ * Connection tokens: the credential the setup installer writes into an
+ * assistant's MCP config. Looked up by hash, revocable from the Connect page,
+ * and tried before anything else so a connected tool is always its owner —
+ * never the loopback dev user.
+ */
+export class ConnectionTokenAuthenticator implements Authenticator {
+  constructor(
+    private readonly ownerOf: (tokenHash: string) => Promise<string | null>,
+    private readonly planOf: (userId: string) => Promise<Plan>,
+  ) {}
+
+  async authenticate(req: IncomingMessage): Promise<Principal | null> {
+    const token = bearer(req);
+    if (!token || !token.startsWith(CONNECTION_TOKEN_PREFIX)) return null;
+    const userId = await this.ownerOf(createHash('sha256').update(token).digest('hex'));
+    if (!userId) return null;
+    return { user_id: userId, plan: await this.planOf(userId) };
+  }
+}
+
 /** Tries each in turn and takes the first that recognises the caller. */
 export class CompositeAuthenticator implements Authenticator {
   constructor(private readonly authenticators: Authenticator[]) {}
@@ -186,6 +225,8 @@ export interface AuthEnvDeps {
   oauth?: { verifier: OAuthTokenVerifier; planOf: (userId: string) => Promise<Plan>; resource: string };
   /** Browser sessions, resolved from the sign-in cookie. */
   session?: { userIdForSession: (sessionId: string) => Promise<string | null>; planOf: (userId: string) => Promise<Plan> };
+  /** Connection tokens minted by setup, resolved by hash. */
+  connections?: { ownerOf: (tokenHash: string) => Promise<string | null>; planOf: (userId: string) => Promise<Plan> };
   /** Hostname the server is bound to, used to keep dev auth off a public interface. */
   host?: string;
 }
@@ -203,6 +244,9 @@ const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 export function authenticatorFromEnv(env: NodeJS.ProcessEnv, deps: AuthEnvDeps = {}): Authenticator {
   const chain: Authenticator[] = [];
 
+  if (deps.connections) {
+    chain.push(new ConnectionTokenAuthenticator(deps.connections.ownerOf, deps.connections.planOf));
+  }
   if (deps.oauth) {
     chain.push(new OAuthAuthenticator(deps.oauth.verifier, deps.oauth.planOf, deps.oauth.resource));
   }

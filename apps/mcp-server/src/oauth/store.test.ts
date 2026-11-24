@@ -232,3 +232,40 @@ describe('refresh token rotation', () => {
     expect(await store.readRefreshToken(sha256('never issued'))).toBeNull();
   });
 });
+
+describe('connection tokens and setup codes', () => {
+  it('exchanges a setup code exactly once, and never after it expires', async () => {
+    const { user_id } = await store.createUser('setup-code@example.com');
+    const code = randomToken();
+    await store.insertSetupCode({ code_hash: sha256(code), user_id, platform: 'cursor', expires_at: soon(60) });
+    expect((await store.readSetupCode(sha256(code)))?.platform).toBe('cursor');
+    expect((await store.exchangeSetupCode(sha256(code)))?.user_id).toBe(user_id);
+    expect(await store.exchangeSetupCode(sha256(code))).toBeNull();
+    // Still readable for the installer's report, until it expires.
+    expect(await store.readSetupCode(sha256(code))).not.toBeNull();
+
+    const stale = randomToken();
+    await store.insertSetupCode({ code_hash: sha256(stale), user_id, platform: 'cursor', expires_at: soon(-1) });
+    expect(await store.exchangeSetupCode(sha256(stale))).toBeNull();
+    expect(await store.readSetupCode(sha256(stale))).toBeNull();
+  });
+
+  it('keeps one live token per assistant and honours revocation', async () => {
+    const { user_id } = await store.createUser('tokens@example.com');
+    const first = sha256('pwr_first');
+    const second = sha256('pwr_second');
+    await store.insertConnectionToken({ token_hash: first, user_id, label: 'claude-code' });
+    await store.insertConnectionToken({ token_hash: second, user_id, label: 'claude-code' });
+    // Re-running setup replaces the old token rather than piling them up.
+    expect(await store.readConnectionToken(first)).toBeNull();
+    const live = await store.readConnectionToken(second);
+    expect(live?.user_id).toBe(user_id);
+    expect((await store.listConnectionTokens(user_id)).map((t) => t.label)).toEqual(['claude-code']);
+    expect((await store.listConnectionTokens(user_id))[0]?.last_used_at).not.toBeNull();
+
+    const { user_id: other } = await store.createUser('someone-else@example.com');
+    expect(await store.revokeConnectionToken(other, second)).toBe(false);
+    expect(await store.revokeConnectionToken(user_id, second)).toBe(true);
+    expect(await store.readConnectionToken(second)).toBeNull();
+  });
+});

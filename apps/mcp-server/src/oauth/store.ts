@@ -98,6 +98,38 @@ export interface SessionSummary {
   ip: string | null;
 }
 
+export interface LoginCode {
+  id_hash: string;
+  email: string;
+  code_hash: string;
+  link_hash: string | null;
+  next: string;
+  attempts: number;
+  sends: number;
+  last_sent_at: Date;
+  created_at: Date;
+  expires_at: Date;
+  consumed_at: Date | null;
+}
+
+export interface ConnectionToken {
+  token_hash: string;
+  user_id: string;
+  /** Which assistant it was made for, e.g. "claude-code". One live token per label. */
+  label: string;
+  created_at: Date;
+  last_used_at: Date | null;
+}
+
+export interface SetupCode {
+  code_hash: string;
+  user_id: string;
+  platform: string;
+  created_at: Date;
+  expires_at: Date;
+  exchanged_at: Date | null;
+}
+
 export interface OAuthStore {
   getClient(clientId: string): Promise<OAuthClientInformationFull | undefined>;
   insertClient(client: OAuthClientInformationFull): Promise<void>;
@@ -140,6 +172,33 @@ export interface OAuthStore {
   profileOf(userId: string): Promise<AccountProfile | null>;
   renameUser(userId: string, name: string): Promise<void>;
   markOnboarded(userId: string): Promise<void>;
+
+  insertLoginCode(c: { id_hash: string; email: string; code_hash: string; link_hash: string; next: string; expires_at: Date; ip: string | null }): Promise<void>;
+  readLoginCode(idHash: string): Promise<LoginCode | null>;
+  /**
+   * Consumes the code if it matches, is unexpired, unused and under the
+   * attempt limit, in one statement. Otherwise counts the attempt against it.
+   */
+  consumeLoginCode(idHash: string, codeHash: string, maxAttempts: number): Promise<LoginCode | null>;
+  /** A fresh code and link for the same challenge: attempts reset, window restarted. */
+  replaceLoginCode(idHash: string, c: { code_hash: string; link_hash: string; expires_at: Date }): Promise<LoginCode | null>;
+  /** Using the emailed link spends the code that came with it. */
+  consumeLoginCodeByLink(linkHash: string): Promise<void>;
+  /** Codes requested for an address since a moment, for rate limiting. */
+  countLoginCodes(email: string, since: Date): Promise<number>;
+
+  /** Stores a new token and revokes any earlier live one with the same label. */
+  insertConnectionToken(t: { token_hash: string; user_id: string; label: string }): Promise<void>;
+  /** A live token's owner; stamps last use at most once a minute. */
+  readConnectionToken(tokenHash: string): Promise<ConnectionToken | null>;
+  listConnectionTokens(userId: string): Promise<ConnectionToken[]>;
+  revokeConnectionToken(userId: string, tokenHash: string): Promise<boolean>;
+
+  insertSetupCode(c: { code_hash: string; user_id: string; platform: string; expires_at: Date }): Promise<void>;
+  /** An unexpired code, whether or not it has been exchanged. */
+  readSetupCode(codeHash: string): Promise<SetupCode | null>;
+  /** Marks an unexpired, unexchanged code as used. Null if it was neither. */
+  exchangeSetupCode(codeHash: string): Promise<SetupCode | null>;
 }
 
 export class PgOAuthStore implements OAuthStore {
@@ -567,7 +626,218 @@ export class PgOAuthStore implements OAuthStore {
       return { user_id: rows[0]!.id, plan: rows[0]!.plan };
     });
   }
+
+  // ---- one-time sign-in codes
+
+  async insertLoginCode(c: { id_hash: string; email: string; code_hash: string; link_hash: string; next: string; expires_at: Date; ip: string | null }): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(`delete from login_codes where expires_at < now() - interval '1 day'`);
+      await tx.query(
+        `insert into login_codes (id_hash, email, code_hash, link_hash, next, expires_at, ip) values ($1,$2,$3,$4,$5,$6,$7)`,
+        [c.id_hash, c.email, c.code_hash, c.link_hash, c.next, c.expires_at, c.ip],
+      );
+    });
+  }
+
+  async readLoginCode(idHash: string): Promise<LoginCode | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<LoginCodeRow>(`select * from login_codes where id_hash = $1`, [idHash]);
+      return rows[0] ? toLoginCode(rows[0]) : null;
+    });
+  }
+
+  async consumeLoginCode(idHash: string, codeHash: string, maxAttempts: number): Promise<LoginCode | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<LoginCodeRow>(
+        `update login_codes set consumed_at = now(), attempts = attempts + 1
+          where id_hash = $1 and code_hash = $2 and consumed_at is null and expires_at > now() and attempts < $3
+          returning *`,
+        [idHash, codeHash, maxAttempts],
+      );
+      if (rows[0]) {
+        // The link from the same email must not work after the code did.
+        if (rows[0].link_hash) {
+          await tx.query(`update login_challenges set consumed_at = now() where token_hash = $1 and consumed_at is null`, [rows[0].link_hash]);
+        }
+        return toLoginCode(rows[0]);
+      }
+      await tx.query(`update login_codes set attempts = attempts + 1 where id_hash = $1 and consumed_at is null`, [idHash]);
+      return null;
+    });
+  }
+
+  async replaceLoginCode(idHash: string, c: { code_hash: string; link_hash: string; expires_at: Date }): Promise<LoginCode | null> {
+    return this.scoped(async (tx) => {
+      const { rows: old } = await tx.query<{ link_hash: string | null }>(`select link_hash from login_codes where id_hash = $1`, [idHash]);
+      if (old[0]?.link_hash) {
+        await tx.query(`update login_challenges set consumed_at = now() where token_hash = $1 and consumed_at is null`, [old[0].link_hash]);
+      }
+      const { rows } = await tx.query<LoginCodeRow>(
+        `update login_codes set code_hash = $2, link_hash = $3, expires_at = $4, attempts = 0, sends = sends + 1, last_sent_at = now()
+          where id_hash = $1 and consumed_at is null
+          returning *`,
+        [idHash, c.code_hash, c.link_hash, c.expires_at],
+      );
+      return rows[0] ? toLoginCode(rows[0]) : null;
+    });
+  }
+
+  async consumeLoginCodeByLink(linkHash: string): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(`update login_codes set consumed_at = now() where link_hash = $1 and consumed_at is null`, [linkHash]);
+    });
+  }
+
+  async countLoginCodes(email: string, since: Date): Promise<number> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<{ n: string | number }>(
+        `select coalesce(sum(sends), 0) as n from login_codes where email = $1 and last_sent_at > $2`,
+        [email, since],
+      );
+      return Number(rows[0]?.n ?? 0);
+    });
+  }
+
+  // ---- connection tokens and setup codes
+
+  async insertConnectionToken(t: { token_hash: string; user_id: string; label: string }): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(
+        `update connection_tokens set revoked_at = now() where user_id = $1 and label = $2 and revoked_at is null`,
+        [t.user_id, t.label],
+      );
+      await tx.query(`insert into connection_tokens (token_hash, user_id, label) values ($1,$2,$3)`, [t.token_hash, t.user_id, t.label]);
+    });
+  }
+
+  async readConnectionToken(tokenHash: string): Promise<ConnectionToken | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<ConnectionTokenRow>(
+        `select * from connection_tokens where token_hash = $1 and revoked_at is null`,
+        [tokenHash],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      // A write per tool call would be a write per keystroke of a chatty client.
+      if (!row.last_used_at || Date.now() - new Date(row.last_used_at).getTime() > 60_000) {
+        await tx.query(`update connection_tokens set last_used_at = now() where token_hash = $1`, [tokenHash]);
+      }
+      return toConnectionToken(row);
+    });
+  }
+
+  async listConnectionTokens(userId: string): Promise<ConnectionToken[]> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<ConnectionTokenRow>(
+        `select * from connection_tokens where user_id = $1 and revoked_at is null order by created_at desc`,
+        [userId],
+      );
+      return rows.map(toConnectionToken);
+    });
+  }
+
+  async revokeConnectionToken(userId: string, tokenHash: string): Promise<boolean> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<{ token_hash: string }>(
+        `update connection_tokens set revoked_at = now()
+          where token_hash = $1 and user_id = $2 and revoked_at is null returning token_hash`,
+        [tokenHash, userId],
+      );
+      return rows.length > 0;
+    });
+  }
+
+  async insertSetupCode(c: { code_hash: string; user_id: string; platform: string; expires_at: Date }): Promise<void> {
+    await this.scoped(async (tx) => {
+      await tx.query(`delete from setup_codes where expires_at < now() - interval '1 day'`);
+      await tx.query(
+        `insert into setup_codes (code_hash, user_id, platform, expires_at) values ($1,$2,$3,$4)`,
+        [c.code_hash, c.user_id, c.platform, c.expires_at],
+      );
+    });
+  }
+
+  async readSetupCode(codeHash: string): Promise<SetupCode | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<SetupCodeRow>(`select * from setup_codes where code_hash = $1 and expires_at > now()`, [codeHash]);
+      return rows[0] ? toSetupCode(rows[0]) : null;
+    });
+  }
+
+  async exchangeSetupCode(codeHash: string): Promise<SetupCode | null> {
+    return this.scoped(async (tx) => {
+      const { rows } = await tx.query<SetupCodeRow>(
+        `update setup_codes set exchanged_at = now()
+          where code_hash = $1 and expires_at > now() and exchanged_at is null
+          returning *`,
+        [codeHash],
+      );
+      return rows[0] ? toSetupCode(rows[0]) : null;
+    });
+  }
 }
+
+interface LoginCodeRow {
+  id_hash: string;
+  email: string;
+  code_hash: string;
+  link_hash: string | null;
+  next: string;
+  attempts: number;
+  sends: number;
+  last_sent_at: string | Date;
+  created_at: string | Date;
+  expires_at: string | Date;
+  consumed_at: string | Date | null;
+}
+
+const toLoginCode = (row: LoginCodeRow): LoginCode => ({
+  id_hash: row.id_hash,
+  email: row.email,
+  code_hash: row.code_hash,
+  link_hash: row.link_hash,
+  next: row.next,
+  attempts: Number(row.attempts),
+  sends: Number(row.sends),
+  last_sent_at: new Date(row.last_sent_at),
+  created_at: new Date(row.created_at),
+  expires_at: new Date(row.expires_at),
+  consumed_at: row.consumed_at ? new Date(row.consumed_at) : null,
+});
+
+interface ConnectionTokenRow {
+  token_hash: string;
+  user_id: string;
+  label: string;
+  created_at: string | Date;
+  last_used_at: string | Date | null;
+}
+
+interface SetupCodeRow {
+  code_hash: string;
+  user_id: string;
+  platform: string;
+  created_at: string | Date;
+  expires_at: string | Date;
+  exchanged_at: string | Date | null;
+}
+
+const toConnectionToken = (row: ConnectionTokenRow): ConnectionToken => ({
+  token_hash: row.token_hash,
+  user_id: row.user_id,
+  label: row.label,
+  created_at: new Date(row.created_at),
+  last_used_at: row.last_used_at ? new Date(row.last_used_at) : null,
+});
+
+const toSetupCode = (row: SetupCodeRow): SetupCode => ({
+  code_hash: row.code_hash,
+  user_id: row.user_id,
+  platform: row.platform,
+  created_at: new Date(row.created_at),
+  expires_at: new Date(row.expires_at),
+  exchanged_at: row.exchanged_at ? new Date(row.exchanged_at) : null,
+});
 
 // ---- row mapping. Postgres returns text[] and jsonb natively; PGlite matches.
 

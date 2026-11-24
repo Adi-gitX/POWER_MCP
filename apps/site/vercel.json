@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @power/protocol build && pnpm build:site",
+  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @power/protocol build && NEXT_PUBLIC_POWER_APP_URL=${NEXT_PUBLIC_POWER_APP_URL:-https://app.usepower.dev} pnpm build:site",
   "framework": "nextjs",
   "headers": [
     { "source": "/(.*)", "headers": [

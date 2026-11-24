@@ -12,14 +12,14 @@ import { randomBytes } from 'node:crypto';
 import { analyseMigration, runGate, type GateError, type MigrationProposal, type MigrationVerdict, type Stage } from '@power/gates';
 import type { RefusalReason } from '@power/protocol';
 import { nextAction, roleForPhase } from '@power/protocol';
-import { apply, createRunState, type RunEvent, type RunState } from '@power/runstate';
+import { apply, createRunState, modeOf, type RunEvent, type RunMode, type RunState } from '@power/runstate';
 import { z } from 'zod';
 import type { DbDriver } from './db.js';
 import { collectRelease, DeployError, deployProjectName, type DeployCredential, type Deployer } from './deploy.js';
 import type { Jobs } from './jobs.js';
 import type { Runtime } from './runtime.js';
 import type { Meter } from './metering.js';
-import { ROLE_BRIEFS, specTemplate, type Role } from './prompts.js';
+import { ROLE_BRIEFS, researchTemplate, specTemplate, type Role } from './prompts.js';
 import type { Sandbox } from './sandbox.js';
 import { validEnvName, type SecretStore } from './secrets.js';
 import type { Approvals, Project, Store } from './store.js';
@@ -44,6 +44,10 @@ export interface HandlerCtx {
    * No token or header check can fix that; only a different origin can.
    */
   previewBaseUrl: string;
+  /** The account's Power Up setting: whether a new run gets research, a plan and verification. */
+  powerUpDefault: () => Promise<boolean>;
+  /** The newest project started in the browser that no assistant has picked up yet. */
+  pendingHandoff?: () => Promise<{ project_id: string; name: string; brief: string } | null>;
   project: Project | null;
   state: RunState | null;
   approvals: Approvals | null;
@@ -99,6 +103,21 @@ function need(ctx: HandlerCtx): { project: Project; state: RunState; approvals: 
  */
 async function startHere(ctx: HandlerCtx): Promise<{ data: Record<string, unknown>; guidance?: string }> {
   const projects = await ctx.store.listProjects();
+  // A session that starts right after "New app" (or after the restart that
+  // connecting needs) is pointed at that project, with the request, so
+  // "continue" is enough and nothing has to be repeated.
+  const pending = await ctx.pendingHandoff?.();
+  if (pending) {
+    return {
+      data: {
+        projects,
+        just_started: pending,
+        next_action: { tool: 'get_context', args: { project_id: pending.project_id }, why: `The user just started "${pending.name}" in Power and handed it to you.` },
+        message: `The user just started "${pending.name}" in Power and handed it to you. Call get_context with project_id "${pending.project_id}" and build it.`,
+      },
+      guidance: `The user's request, in their words:\n\n${pending.brief}`,
+    };
+  }
   return {
     data: {
       projects,
@@ -150,8 +169,9 @@ async function askForDeployToken(ctx: HandlerCtx, project: Project): Promise<Han
     refusal: {
       reason: 'needs_user_input',
       message:
-        `Publishing deploys to the user's own hosting account, and there is no token for it yet. ` +
-        `Ask them to open ${ctx.baseUrl}/secrets/${pending.token} and paste a hosting access token there. ` +
+        `Publishing deploys to the user's own Vercel account, and it is not connected yet. ` +
+        `Ask them to open ${ctx.baseUrl}/start/vercel and connect Vercel there (it checks the token with Vercel before saving). ` +
+        `If they prefer, ${ctx.baseUrl}/secrets/${pending.token} takes the token directly. ` +
         `Do not ask for the token in this conversation, and do not call publish_app again until they say it is saved. ` +
         `It is stored once and reused for every project.`,
     },
@@ -178,11 +198,39 @@ function approvalUrl(ctx: HandlerCtx, project: Project): string {
 }
 
 function briefFor(state: RunState): string | undefined {
+  if (state.phase === 'build' && modeOf(state) === 'standard') return ROLE_BRIEFS.builder;
   const role = roleForPhase(state) as Role | null;
   return role && role in ROLE_BRIEFS ? ROLE_BRIEFS[role] : undefined;
 }
 
-function slugify(name: string): string {
+const powerUpArg = z
+  .boolean()
+  .optional()
+  .describe('Power Up: research, a plan the user approves, and verification before publishing. Only when the user asks for it; leave it out to use their account setting (off unless they turned it on).');
+
+/**
+ * The first state of a run, by mode. Standard goes straight to the build;
+ * Power Up starts with research. Both are recorded in the run's history.
+ */
+export function startRun(traceId: string, mode: RunMode): RunState {
+  const fresh = createRunState(traceId, undefined, mode);
+  return mode === 'standard' ? apply(fresh, { type: 'fast_track' }) : apply(fresh, { type: 'start_research' });
+}
+
+/** What the assistant is told at the start of a run, by mode. */
+function startGuidance(mode: RunMode, name: string): string {
+  return mode === 'standard'
+    ? `Power Up is off for this run, so it starts in the build.\n\n${ROLE_BRIEFS.builder}`
+    : `Power Up is on for this run: research, then a plan the user approves, then the build and independent verification.\n\n${ROLE_BRIEFS.researcher}\n\nA research.json that satisfies the gate's shape (replace every value with what you found):\n\n${researchTemplate(name)}`;
+}
+
+async function chosenMode(args: Record<string, unknown>, ctx: HandlerCtx): Promise<RunMode> {
+  const explicit = args.power_up;
+  const on = typeof explicit === 'boolean' ? explicit : await ctx.powerUpDefault();
+  return on ? 'power_up' : 'standard';
+}
+
+export function slugify(name: string): string {
   return (
     name
       .toLowerCase()
@@ -264,22 +312,31 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
   list_projects: {
     schema: {},
     needsProject: false,
-    handler: async (_args, ctx) => ({
-      data: { projects: await ctx.store.listProjects(), quota: await ctx.meter.remaining(ctx.userId) },
-    }),
+    handler: async (_args, ctx) => {
+      const pending = await ctx.pendingHandoff?.();
+      return {
+        data: {
+          projects: await ctx.store.listProjects(),
+          quota: await ctx.meter.remaining(ctx.userId),
+          ...(pending ? { just_started: pending, message: `The user just started "${pending.name}" and handed it to you. Call get_context with project_id "${pending.project_id}" and build it.` } : {}),
+        },
+        ...(pending ? { guidance: `The user's request, in their words:\n\n${pending.brief}` } : {}),
+      };
+    },
   },
 
   create_project: {
     schema: {
       name: z.string().min(1).max(80).describe('What the user is building, in a few words.'),
+      power_up: powerUpArg,
     },
     needsProject: false,
     handler: async (args, ctx) => {
       const name = args.name as string;
       const id = randomBytes(5).toString('hex');
       const created: Project = { id, name, slug: slugify(name), created_at: new Date().toISOString() };
-      // v1 starts at the plan. Research is recorded as skipped, not passed.
-      const state = apply(createRunState(`run_${id}`), { type: 'research_skipped' });
+      const mode = await chosenMode(args, ctx);
+      const state = startRun(`run_${id}`, mode);
       await ctx.sandbox.create(id, created.slug);
       await ctx.store.createProject(created, state);
       return {
@@ -287,10 +344,11 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
         data: {
           project_id: id,
           name,
+          mode,
           approval_url: approvalUrl(ctx, created),
           workbench_files: await ctx.sandbox.listFiles(id),
         },
-        guidance: `${ROLE_BRIEFS.architect}\n\nA starting template for SPEC.md:\n\n${specTemplate(name)}`,
+        guidance: startGuidance(mode, name),
       };
     },
   },
@@ -302,11 +360,12 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
    * SPEC.md stays in the workbench as context for the next architect.
    */
   start_run: project(
-    { goal: z.string().min(4).max(400).describe('What to build or change next, in the user\'s words.') },
+    { goal: z.string().min(4).max(400).describe('What to build or change next, in the user\'s words.'), power_up: powerUpArg },
     async (args, ctx) => {
       const { project: p, state: previous, approvals } = need(ctx);
       const runId = `run_${randomBytes(5).toString('hex')}`;
-      const state = apply(createRunState(runId), { type: 'research_skipped' });
+      const mode = await chosenMode(args, ctx);
+      const state = startRun(runId, mode);
       await ctx.store.putRun(p.id, state);
       await ctx.store.putApprovals(p.id, {
         ...approvals,
@@ -315,6 +374,7 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
         publish_confirmed_at: null,
         migration_confirmed_at: null,
       });
+      await ctx.store.putGateErrors(p.id, 'research', []);
       await ctx.store.putGateErrors(p.id, 'spec', []);
       await ctx.store.putGateErrors(p.id, 'verification', []);
       await ctx.sandbox.checkpoint(p.id, `New run: ${(args.goal as string).slice(0, 60)}`, {
@@ -330,13 +390,17 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
           goal: args.goal,
           // What is live stays live while the next run is planned and built.
           live: await liveSummary(ctx, p.id),
-          note: 'The workbench, checkpoints, database and secrets carry over. Write a plan for this change only.',
+          mode,
+          note:
+            mode === 'standard'
+              ? 'The workbench, checkpoints, database and secrets carry over. Build this change only.'
+              : 'The workbench, checkpoints, database and secrets carry over. Research and plan this change only.',
         },
         guidance:
-          `${ROLE_BRIEFS.architect}\n\n` +
+          `${startGuidance(mode, p.name)}\n\n` +
           `This is a change to an existing app. The goal: ${args.goal}\n` +
           (previousSpec
-            ? `The previous plan is below for context; write a new SPEC.md covering only what changes now, with fresh requirement ids.\n\n---- previous SPEC.md ----\n${previousSpec.slice(0, 6000)}`
+            ? `The previous SPEC.md is below for context${mode === 'power_up' ? '; the new plan covers only what changes now, with fresh requirement ids' : ''}.\n\n---- previous SPEC.md ----\n${previousSpec.slice(0, 6000)}`
             : ''),
       };
     },
@@ -535,6 +599,44 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
   }),
 
   // ------------------------------------------------------------ the pipeline
+  submit_research: project({ research: z.string().describe('The full contents of research.json.') }, async (args, ctx) => {
+    const { project: p, state } = need(ctx);
+    const research = args.research as string;
+    const gate = runGate('research', { 'research.json': research });
+    await ctx.store.putArtifact(p.id, 'research.json', research);
+    await ctx.store.putGateErrors(p.id, 'research', gate.errors);
+    await ctx.sandbox.writeFile(p.id, 'research.json', research);
+
+    if (!gate.pass) {
+      return {
+        events: [
+          { type: 'gate_result', stage: 'research', result: gate },
+          { type: 'retry', edge: 'research_refetch', reason: `${gate.errors.length} research gate failure(s)` },
+        ],
+        refusal: {
+          reason: 'gate_not_satisfied',
+          gate: 'research',
+          failures: gate.errors,
+          message: `research.json failed ${gate.errors.length} rule(s). Fix each failure listed and submit again.`,
+        },
+        guidance: ROLE_BRIEFS.researcher,
+      };
+    }
+
+    await ctx.sandbox.checkpoint(p.id, 'Research passed its gate', {
+      'Power-Run': state.trace_id,
+      'Power-Phase': 'research',
+      'Power-Gate-Research': 'pass',
+    });
+    return {
+      // Passing research hands straight to the plan: there is no separate
+      // human review of research, only of the plan built on it.
+      events: [{ type: 'gate_result', stage: 'research', result: gate }, { type: 'checkpoint_acknowledged' }],
+      data: { passed: true },
+      guidance: `Research passed. Now write the plan it supports.\n\n${ROLE_BRIEFS.architect}\n\nA starting template for SPEC.md:\n\n${specTemplate(p.name)}`,
+    };
+  }),
+
   submit_spec: project({ spec: z.string().describe('The full contents of SPEC.md.') }, async (args, ctx) => {
     const { project: p, state } = need(ctx);
     const spec = args.spec as string;
@@ -724,7 +826,8 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     const tests = await ctx.sandbox.run(p.id, ['pnpm', 'test'], env);
     const green = typecheck.ok && tests.ok;
     const events: RunEvent[] = [{ type: 'self_verify', green }];
-    if (green && state.phase === 'build') {
+    const standard = modeOf(state) === 'standard';
+    if (green && state.phase === 'build' && !standard) {
       await ctx.sandbox.checkpoint(p.id, 'Build green: typecheck and tests pass', {
         'Power-Run': state.trace_id,
         'Power-Phase': 'build',
@@ -734,7 +837,13 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     return {
       data: { green, typecheck, tests },
       events,
-      guidance: green ? ROLE_BRIEFS.verifier : ROLE_BRIEFS.implementer,
+      guidance: standard
+        ? green
+          ? `Green: typecheck and tests pass. Tell the user it is ready, then call publish_app; they confirm in their browser at ${approvalUrl(ctx, p)}.`
+          : ROLE_BRIEFS.builder
+        : green
+          ? ROLE_BRIEFS.verifier
+          : ROLE_BRIEFS.implementer,
     };
   }),
 
@@ -928,10 +1037,24 @@ export const TOOL_DEFS: Record<string, ToolDef> = {
     // contain committed work.
     const { version } = await ctx.sandbox.tagRelease(p.id);
     const files = await collectRelease(ctx.sandbox, p.id, version);
-    const name = deployProjectName(p.slug);
+    // An app that has published before keeps its hosting project, whatever
+    // the naming rule was then; a new one gets a name only it can have.
+    const previous = (await ctx.store.listDeployments(p.id, 'production', 1))[0] ?? (await ctx.store.listDeployments(p.id, 'preview', 1))[0];
+    const name = previous?.deploy_project_name ?? deployProjectName(p.slug, p.id);
 
     let deployment;
     try {
+      if (!previous && ctx.deployer.projectExists && (await ctx.deployer.projectExists(name, cred))) {
+        return {
+          refusal: {
+            reason: 'needs_user_input',
+            message:
+              `Your hosting account already has a project named "${name}", and Power did not create it. ` +
+              `Publishing would deploy into it and replace that app's production site, so nothing was published. ` +
+              `Rename or delete that project in Vercel, or rename this app, then publish again.`,
+          },
+        };
+      }
       deployment = await ctx.deployer.create(
         {
           projectName: name,

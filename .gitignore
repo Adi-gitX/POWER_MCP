@@ -11,6 +11,7 @@ apps/web/dist/
 
 # Next.js
 apps/site/.next/
+apps/site/.next-dev/
 apps/site/out/
 apps/site/next-env.d.ts
 .vercel

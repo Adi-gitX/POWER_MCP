@@ -141,7 +141,8 @@ describe('projects page', () => {
   it('has a real empty state for a new account', () => {
     const html = projectsPage([], ctx);
     expect(html).toContain('No projects yet');
-    expect(html).toContain('Connect an assistant');
+    expect(html).toContain('+ New app');
+    expect(html).toContain('data-new-app="new"');
     expect(html).toContain('Approve and publish');
     expect(html).not.toContain('list-tools');
   });

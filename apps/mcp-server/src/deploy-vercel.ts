@@ -21,7 +21,11 @@ import {
   type ReadyState,
 } from './deploy.js';
 
-const API = 'https://api.vercel.com';
+/**
+ * The API origin. Overridable so a local run can point at a stand-in and the
+ * setup flow can be exercised end to end without a real account.
+ */
+const API = process.env.POWER_VERCEL_API_URL?.trim() || 'https://api.vercel.com';
 const UPLOAD_CONCURRENCY = 8;
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -46,6 +50,16 @@ export class VercelDeployer implements Deployer {
   async whoami(cred: DeployCredential): Promise<{ account: string }> {
     const body = await this.json<{ user?: { username?: string; email?: string } }>('GET', '/v2/user', cred);
     return { account: body.user?.username ?? body.user?.email ?? 'unknown' };
+  }
+
+  /** The team a credential is scoped to, which also proves the token can act in it. */
+  async team(cred: DeployCredential & { teamId: string }): Promise<{ id: string; name: string; slug: string }> {
+    // Accepts an id or a slug; the canonical id comes back and is what deploys use.
+    const body = await this.json<{ id?: string; name?: string; slug?: string }>('GET', `/v2/teams/${encodeURIComponent(cred.teamId)}`, {
+      token: cred.token,
+      teamId: null,
+    });
+    return { id: body.id ?? cred.teamId, name: body.name ?? body.slug ?? cred.teamId, slug: body.slug ?? cred.teamId };
   }
 
   async create(req: DeployRequest, cred: DeployCredential): Promise<Deployment> {
@@ -98,6 +112,13 @@ export class VercelDeployer implements Deployer {
   }
 
   /** Promotion, not a rebuild: the previous build is already there. */
+  async projectExists(projectName: string, cred: DeployCredential): Promise<boolean> {
+    const response = await this.send('GET', `/v9/projects/${encodeURIComponent(projectName)}`, cred, {});
+    if (response.status === 404) return false;
+    if (!response.ok) throw await this.toError(response, 'GET /v9/projects');
+    return true;
+  }
+
   async promote(projectName: string, deploymentId: string, cred: DeployCredential): Promise<Deployment> {
     await this.json('POST', `/v10/projects/${encodeURIComponent(projectName)}/promote/${encodeURIComponent(deploymentId)}`, cred, {});
     return this.get(deploymentId, cred);

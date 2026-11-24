@@ -82,6 +82,12 @@ export interface Deployer {
   /** Make an already-ready deployment the production one. No rebuild. */
   promote(projectName: string, deploymentId: string, cred: DeployCredential): Promise<Deployment>;
   remove(id: string, cred: DeployCredential): Promise<void>;
+  /**
+   * Whether the account already has a hosting project of this name. Asked
+   * before a project's first publish, so Power never deploys into a project it
+   * did not create. Providers without named projects omit it.
+   */
+  projectExists?(projectName: string, cred: DeployCredential): Promise<boolean>;
   buildLogs(id: string, cred: DeployCredential, limit?: number): Promise<string[]>;
 }
 
@@ -122,11 +128,17 @@ export async function collectRelease(
 export const sha1 = (bytes: Buffer): string => createHash('sha1').update(bytes).digest('hex');
 
 /** A project name the provider will accept, derived from the slug. */
-export function deployProjectName(slug: string): string {
-  const name = slug
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 100);
-  return name || 'power-app';
+/**
+ * The hosting project a Power app publishes to.
+ *
+ * Prefixed and suffixed with the project id, because a hosting account is
+ * shared with everything else its owner runs: a bare slug like `site` or
+ * `dashboard` names a project that may already exist, and Vercel deploys into
+ * an existing project of the same name, replacing that app's production.
+ */
+export function deployProjectName(slug: string, projectId: string): string {
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  const id = clean(projectId).replace(/-/g, '').slice(0, 6) || 'app';
+  const base = clean(slug).slice(0, 100 - 'power--'.length - id.length).replace(/-+$/, '') || 'app';
+  return `power-${base}-${id}`;
 }

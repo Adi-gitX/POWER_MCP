@@ -62,6 +62,8 @@ export interface ContextBlock {
   run_id: string;
   phase: Phase;
   phase_label: string;
+  /** standard, or power_up when the run carries research, an approved plan and verification. */
+  mode: 'standard' | 'power_up';
   /** Which environment the call acted on. Never `live` for anything the AI writes. */
   env: 'workbench' | 'live';
   /** Unresolved gate failures across all stages, so a model cannot lose track of them. */
